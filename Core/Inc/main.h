@@ -63,8 +63,8 @@ void Error_Handler(void);
 #define INTERRUPCION_IMU_GPIO_Port GPIOA
 #define CS_FLASH_Pin GPIO_PIN_1
 #define CS_FLASH_GPIO_Port GPIOA
-#define TX_LASER_Pin GPIO_PIN_2
-#define TX_LASER_GPIO_Port GPIOA
+#define Tx_Laser_Pin GPIO_PIN_2
+#define Tx_Laser_GPIO_Port GPIOA
 #define MUX_SEL_C_Pin GPIO_PIN_3
 #define MUX_SEL_C_GPIO_Port GPIOA
 #define MUX_SEL_CA4_Pin GPIO_PIN_4
@@ -87,13 +87,13 @@ void Error_Handler(void);
 #define BOTON_A_GPIO_Port GPIOB
 #define SELECTOR_MCU_Pin GPIO_PIN_12
 #define SELECTOR_MCU_GPIO_Port GPIOB
-#define DISPARADOR_Pin GPIO_PIN_8
-#define DISPARADOR_GPIO_Port GPIOA
+#define GATILLO_Pin GPIO_PIN_8
+#define GATILLO_GPIO_Port GPIOA
 #define MCU_TX_Pin GPIO_PIN_9
 #define MCU_TX_GPIO_Port GPIOA
 #define MCU_RX_Pin GPIO_PIN_10
 #define MCU_RX_GPIO_Port GPIOA
-#define BUZZER_Pin GPIO_PIN_5
+#define BUZZER_Pin GPIO_PIN_3
 #define BUZZER_GPIO_Port GPIOB
 #define BLUETOOTH_VSP_Pin GPIO_PIN_8
 #define BLUETOOTH_VSP_GPIO_Port GPIOB
