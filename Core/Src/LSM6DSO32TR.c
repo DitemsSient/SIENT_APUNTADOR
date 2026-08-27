@@ -1,6 +1,8 @@
 /**
  * @file    LSM6DSO32TR.c
- * @brief   Driver implementation for ST LSM6DSO32TR 6-axis IMU (accel + gyro).
+ * @brief   Driver implementation for ST LSM6DS3 6-axis IMU (accel + gyro).
+ *          Nombre de archivo/API conservan "LSM6DSO32TR" por compatibilidad
+ *          con el resto del proyecto; el chip real es LSM6DS3 (WHO_AM_I 0x69).
  *
  * @date    June 12, 2026
  * @author  César Pérez
@@ -158,7 +160,7 @@ LSM_Status_e LSM6DSO32TR_Init(LSM6DSO32TR_t *dev)
 }
 
 /**
- * @brief  Reads WHO_AM_I register (0x0F). Expected value is 0x6C.
+ * @brief  Reads WHO_AM_I register (0x0F). Expected value is 0x69 (LSM6DS3).
  */
 LSM_Status_e LSM6DSO32TR_WhoAmI(LSM6DSO32TR_t *dev, uint8_t *id)
 {

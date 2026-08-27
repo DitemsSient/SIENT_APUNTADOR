@@ -1,0 +1,154 @@
+  /* Laser IR transmitter */
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_Base_Start(&htim3);
+  Tx_IR_Init();
+
+  /* Buzzer */
+  Buzzer_Init();
+
+  /* Vibration motor */
+  Vibrator_Init();
+
+  /* RGB LED */
+  LedRGB_Init();
+
+  /* LoRa module (disabled — huart1 used by GPS) */
+  Lora_Init(&hlora);
+
+  /* GPS module (disabled — huart1 used by Bluetooth) */
+  Gps_Init(&hgps);
+//  Gps_SendMTK(&hgps, GPS_OUTPUT_RMC_GGA);
+//  Gps_SendMTK(&hgps, GPS_FIX_0_5HZ);
+//  Gps_StartTracking(&hgps);
+//  track_session_start_ms = HAL_GetTick();
+//  track_last_update_ms   = track_session_start_ms;
+
+  /* Bluetooth module */
+  Bt_Init(&hbt);
+
+  /* Battery monitor BQ27441 */
+  bat_st = BatGauge_Init();
+  HAL_Delay(1000);
+
+  /* Menu system */
+  Menu_Init(&hmenu);
+  ssd1306_begin(SSD1306_SWITCHCAPVCC, SSD1306_I2C_ADDRESS);
+
+  /* LSM6DSO32TR 6-axis IMU — keep the board still during gyro calibration (~2 s) */
+  lsm_init_status = LSM6DSO32TR_Init(&lsm);
+  if (lsm_init_status == LSM_OK) {
+      LSM6DSO32TR_CalibrateGyroBias(&lsm);
+  }
+
+  /* MMC5983MA magnetometer */
+  mmc_init_status = MMC5983MA_Init();
+
+  /* Power Manager */
+  PowerManager_Init(&hgps, &lsm, &tsl, &rgb, &hlora);
+
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+
+    /* ============================================================
+     *  POWER MANAGER — Suspend all / Wake all test
+     * ============================================================ */
+//    PM_Result_t pm_result;
+//
+//    /* Suspend: turns off all ICs and actuators */
+//    PowerManager_SuspendAll(&pm_result);
+//    HAL_Delay(5000);
+//
+//    /* Wake: restores all ICs to normal operation */
+//    PowerManager_WakeAll(&pm_result);
+//    HAL_Delay(2000);
+
+    /* ============================================================
+     *  MENU SYSTEM — Poll buttons and update display
+     * ============================================================ */
+    Menu_Poll(&hmenu);
+    Menu_Update(&hmenu);
+
+    /* ============================================================
+     *  IR RECEIVER
+     * ============================================================ */
+//    status = IR_Process(&ir_receiver);
+//    if (ir_receiver.checksum == true) {
+//        HAL_Delay(1500);
+//        ResetParser(&ir_receiver);
+//        ir_receiver.checksum = false;
+//    }
+
+    /* ============================================================
+     *  RX_CODE — Receive and decode IR frame, check calibration code
+     * ============================================================
+     * laser_calibration_mode = true  → compare received data to IR_CAL_CODE (0xABCDEF)
+     *                                   if match: TODO — blink LP55231 Driver RGB LEDs
+     * laser_calibration_mode = false → normal game reception (process player MAC)
+     * ============================================================ */
+//    status = IR_Process(&ir_receiver);
+//
+//    if (ir_receiver.checksum == true) {
+//        ir_receiver.checksum = false;
+//
+//        if (laser_calibration_mode) {
+//            /* Frame has 3 data bytes + 1 checksum — reconstruct 24-bit code */
+//            uint32_t received_code = ((uint32_t)ir_receiver.frame_buf[0] << 16U)
+//                                   | ((uint32_t)ir_receiver.frame_buf[1] <<  8U)
+//                                   |  (uint32_t)ir_receiver.frame_buf[2];
+//
+//            if (received_code == IR_CAL_CODE) {
+//                /* Calibration code matched — TODO: LP55231_Blink() */
+//            }
+//        } else {
+//            /* TODO: process player MAC for game logic */
+//        }
+//
+//        ResetParser(&ir_receiver);
+//    }
+
+    /* ============================================================
+     *  LIGHT SENSOR TSL2571
+     * ============================================================ */
+//    TSL2571_ReadLux(&tsl, 10, 13, &lux, &channels);
+//    HAL_Delay(200);
+
+    /* ============================================================
+     *  MULTIPLEXER CD4051B
+     * ============================================================ */
+//    MUX_SelectChannel(&hmux, MUX_CHANNEL_3);
+
+    /* ============================================================
+     *  DEMO: LIGHT + MUX + POWER
+     * ============================================================ */
+//    DEMO_Update();
+//    HAL_Delay(200);
+
+    /* ============================================================
+     *  RS-485 COMMUNICATION
+     * ============================================================ */
+//    RS485_Send(&hrs485, &tx_data);
+//    HAL_Delay(2000);
+//    RS485_Parse(&frame_rx, &rx_data);
+
+    /* ============================================================
+     *  RGB DRIVER (LP55231)
+     * ============================================================ */
+//    val_RGB ^= 0xFFU;
+//    for (uint8_t i = 0U; i < LP55231_NUM_CHANNELS; i++) {
+//        LP55231_SetChannelPWM(&rgb, i, val_RGB);
+//    }
+
+    /* ============================================================
+     *  LASER IR TRANSMITTER
+     * ============================================================ */
+//    Buf_TxIR[3] = contador;
+//    Tx_IR_SendFrame(Buf_TxIR, 4);
+//    contador++;
+//    HAL_Delay(2000);

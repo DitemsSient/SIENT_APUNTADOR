@@ -5,6 +5,47 @@ entre paréntesis en `/new-rama <rama> (nombre)`.
 
 ---
 
+## bootloader
+
+Salto por software al bootloader USB DFU de fábrica del STM32L433, sin necesidad del pin `BOOT0` (no está expuesto en esta tarjeta). Se dispara con un botón sostenido al arranque; si no está presionado, continúa el boot normal de la app.
+
+**Archivo:** `Bootloader.h` / `Bootloader.c` · **Versión:** 1.0.0  
+**Componente:** Bootloader de sistema ST (System Memory), vía USB DFU  
+**Botón:** reutiliza `BOTON_A` (PB11), activo-bajo  
+**Dirección System Memory:** `0x1FFF0000` (STM32L433, confirmada en AN2606)
+
+LED de feedback (usa `LedRGB`, debe estar inicializado antes de llamar): **rojo** = botón detectado, va a saltar. **verde** = no detectado, sigue arranque normal.
+
+**API:**
+- `Bootloader_CheckAndEnter()` — llamar lo antes posible en `main()`, justo después de `MX_GPIO_Init()` y `LedRGB_Init()`. Si el botón está presionado, resetea relojes/periféricos, remapea `System Memory` a `0x00000000`, y salta — **no regresa**. Si no, prende el LED verde brevemente, lo apaga, y regresa `BOOTLOADER_NOT_ENTERED`.
+
+Sin `Bootloader_Test()` — la única forma de "probarlo" es saltar de verdad, lo cual termina la ejecución normal.
+
+Una vez saltado: la PC ve un dispositivo USB clase DFU (no un puerto COM — esa es la clase CDC, algo distinto). Flashear con **STM32CubeProgrammer**, conexión tipo **USB** en vez de **ST-LINK**.
+
+Salto confirmado en hardware (carga por USB DFU con STM32CubeProgrammer, modo USB). El puerto COM virtual (USB CDC) para cuando NO se entra al bootloader ya está agregado — ver sección `Logger` — y el propio `Logger` ya vive ahí.
+
+---
+
+## Logger
+
+Logging serial por texto, con tag y formato tipo `printf`. Desde la migración a USB, manda por **USB CDC** (`CDC_Transmit_FS`, middleware `USB_DEVICE` generado por CubeMX) en vez de por `huart1` — `huart1` queda libre exclusivamente para Bluetooth.
+
+**Archivo:** `Logger.h` / `Logger.c` · **Versión:** 2.0.0  
+**Componente:** Puerto COM virtual (USB CDC), vía `USB_DEVICE/App/usbd_cdc_if.c`  
+**Requiere:** `MX_USB_DEVICE_Init()` ya haya corrido — que en `main.c` solo pasa si `Bootloader_CheckAndEnter()` **no** saltó al bootloader (ver sección `bootloader`).
+
+Formato de salida: `[TAG] mensaje\r\n`. Mensaje armado en un buffer de 160 bytes (`LOG_MAX_MSG_LEN`), se trunca silenciosamente si es más largo.
+
+**API:**
+- `Log_Init()` — llamar una vez después de `MX_USB_DEVICE_Init()`.
+- `Log_Print(tag, msg)` — manda un mensaje ya armado.
+- `Log_Printf(tag, fmt, ...)` — versión con formato, arma el mensaje con `vsnprintf` y llama a `Log_Print()`.
+
+`CDC_Transmit_FS()` puede regresar `USBD_BUSY` si el paquete anterior no ha terminado de irse — `Log_Print()` reintenta hasta `LOG_TX_TIMEOUT_MS` (100 ms) y si no, se rinde en silencio (nunca cuelga la app si no hay terminal conectada del otro lado).
+
+---
+
 ## buzzer
 
 Controla un buzzer pasivo para generar tonos y melodías musicales mediante PWM. Permite reproducir notas individuales, secuencias completas con tempo configurable y silencios. Es la capa de retroalimentación sonora del sistema (alertas, confirmaciones, boot).
@@ -188,14 +229,14 @@ como prescaler para testing.
 
 ## LSM6DSO32TR
 
-Driver para el IMU de 6 ejes ST LSM6DSO32TR (acelerómetro + giroscopio) via I2C. Entrega los seis ejes en dos transacciones burst de 6 bytes cada una, aplica calibración de bias del giroscopio y cuenta con recuperación automática por SW reset ante errores I2C. Soporta modo power-down (ODR=0) para bajo consumo.
+Driver para el IMU de 6 ejes via I2C. **El nombre del archivo/API dice "LSM6DSO32TR" pero el chip real soldado en esta tarjeta es un LSM6DS3** (confirmado por `WHO_AM_I = 0x69`, no `0x6C`) — el mapa de registros usado es compatible entre ambos, así que el driver funciona igual, solo cambió la constante de `WHO_AM_I` esperado. Entrega los seis ejes en dos transacciones burst de 6 bytes cada una, aplica calibración de bias del giroscopio y cuenta con recuperación automática por SW reset ante errores I2C. Soporta modo power-down (ODR=0) para bajo consumo.
 
-**Archivo:** `LSM6DSO32TR.h` / `LSM6DSO32TR.c` · **Versión:** 1.0.0  
-**Componente:** IMU 6 ejes ST LSM6DSO32TR (accel + gyro)  
+**Archivo:** `LSM6DSO32TR.h` / `LSM6DSO32TR.c` · **Versión:** 1.1.0  
+**Componente:** IMU 6 ejes ST LSM6DS3 (accel + gyro) — nombre de archivo histórico "LSM6DSO32TR"  
 **Bus:** I2C1 (`hi2c1`) · **Dirección:** `0x6A` (SA0=GND)
 
 Configuración fija: accel ±16 g / gyro ±500 dps, ODR 104 Hz HP, BDU habilitado.  
-WHO_AM_I esperado: `0x6C`.
+WHO_AM_I esperado: `0x69` (LSM6DS3).
 
 Handle: `LSM6DSO32TR_t { cal, initialized, consecutive_errors, total_recoveries }`.  
 Datos: `LSM_Data_t { ax/ay/az_raw, gx/gy/gz_raw, ax/ay/az_g, gx/gy/gz_dps, temp_c }`.  
@@ -206,7 +247,7 @@ Bajo consumo: `PowerDown` escribe ODR=0 en CTRL1_XL y CTRL2_G; `PowerOn` restaur
 
 **API:**
 - `LSM6DSO32TR_Init(dev)` — SW reset + WHO_AM_I + configura accel/gyro/BDU
-- `LSM6DSO32TR_WhoAmI(dev, &id)` — retorna 0x6C
+- `LSM6DSO32TR_WhoAmI(dev, &id)` — retorna 0x69
 - `LSM6DSO32TR_CalibrateGyroBias(dev)` — 200 muestras × 10 ms ≈ 2 s en reposo
 - `LSM6DSO32TR_ReadAll(dev, &out)` — burst gyro + burst accel + temperatura, bias corregido
 - `LSM6DSO32TR_Recover(dev)` — SW reset + reconfig, preserva cal

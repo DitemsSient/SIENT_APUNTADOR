@@ -1,0 +1,153 @@
+// =========================================================
+// CONFIGURACIÓN
+// =========================================================
+// OJO: en Arduino Uno/Nano, A6/A7 son solo-analógicos y NO soportan
+// digitalRead(). Si no lees nada, cambia RX_PIN a un pin digital (ej. 2).
+#define RX_PIN              A6
+#define FRAME_BUF_SIZE      16u
+
+// Umbrales de clasificación (lógica "menor que" en cascada)
+// STM32 programa: BIT0=400, BIT1=800, INTER=1200, SYNC=1600
+#define NOISE_THRESH        200u    // < 200  → ignorar (ruido / glitch)
+#define BIT0_THRESH         600u    // < 600  → BIT 0
+#define BIT1_THRESH         1050u   // < 1050 → BIT 1
+#define INTER_THRESH        1600u   // < 1400 → INTER
+                                    // ≥ 1400 → SYNC
+
+// =========================================================
+// VARIABLES GLOBALES
+// =========================================================
+static bool           estado_high = false;
+static unsigned long  inicio_high = 0;
+
+// --- Decoder ---
+static uint8_t  dec_bit_count = 0;              // bits del byte en curso
+static uint8_t  dec_byte_buf  = 0;              // byte en construcción
+static uint8_t  dec_bytes[FRAME_BUF_SIZE];      // bytes decodificados
+static uint8_t  dec_byte_idx  = 0;
+static bool     dec_in_frame  = false;          // true entre SYNC inicio y SYNC fin
+
+// =========================================================
+// UTILIDADES
+// =========================================================
+
+static uint8_t ComputeChecksum(const uint8_t *data, uint8_t len) {
+    uint8_t chk = 0;
+    for (uint8_t i = 0; i < len; i++) chk ^= data[i];
+    return chk;
+}
+
+// =========================================================
+// MODO DECODER
+// =========================================================
+
+static void Decoder_Reset(void) {
+    dec_bit_count = 0;
+    dec_byte_buf  = 0;
+    dec_byte_idx  = 0;
+    dec_in_frame  = false;
+    memset(dec_bytes, 0, sizeof(dec_bytes));
+}
+
+static void Decoder_AddBit(uint8_t bit) {
+    dec_byte_buf = (dec_byte_buf << 1) | bit;
+    dec_bit_count++;
+    if (dec_bit_count == 8) {
+        if (dec_byte_idx < FRAME_BUF_SIZE) {
+            dec_bytes[dec_byte_idx++] = dec_byte_buf;
+        }
+        dec_byte_buf  = 0;
+        dec_bit_count = 0;
+    }
+}
+
+/**
+ * @brief  Procesa la trama completa: separa datos del checksum, verifica,
+ *         e imprime como texto. Filtra cualquier trama que no empiece con
+ *         "Cont" (descarta ruido/luz artificial que arme bits validos
+ *         pero no forme esa palabra).
+ */
+static void Decoder_ProcessFrame(void) {
+    if (dec_byte_idx < 3) {
+        Decoder_Reset();
+        return;
+    }
+
+    uint8_t data_len = dec_byte_idx - 1;
+    uint8_t chk_rx   = dec_bytes[data_len];
+    uint8_t chk_calc = ComputeChecksum(dec_bytes, data_len);
+
+    if (data_len < 4 ||
+        dec_bytes[0] != 'C' || dec_bytes[1] != 'o' ||
+        dec_bytes[2] != 'n' || dec_bytes[3] != 't') {
+        Decoder_Reset();
+        return;
+    }
+
+    Serial.print("Frame recieve: ");
+    for (uint8_t i = 0; i < data_len; i++) {
+        Serial.print((char)dec_bytes[i]);
+    }
+
+    Serial.print(" | Chk_calc: 0x");
+    if (chk_calc < 0x10) Serial.print("0");
+    Serial.print(chk_calc, HEX);
+
+    Serial.print(" | Chk_rx: 0x");
+    if (chk_rx < 0x10) Serial.print("0");
+    Serial.print(chk_rx, HEX);
+
+    Serial.println((chk_calc == chk_rx) ? " | OK" : " | ERROR");
+
+    Decoder_Reset();
+}
+
+static void Decoder_ProcessTime(unsigned long duracion) {
+    if (duracion < NOISE_THRESH) return;
+
+    if (duracion < BIT0_THRESH) {
+        if (dec_in_frame) Decoder_AddBit(0);
+    }
+    else if (duracion < BIT1_THRESH) {
+        if (dec_in_frame) Decoder_AddBit(1);
+    }
+    else if (duracion < INTER_THRESH) {
+        // INTER — separador entre bytes, no hacer nada
+    }
+    else {
+        // SYNC
+        if (!dec_in_frame) {
+            Decoder_Reset();
+            dec_in_frame = true;
+        } else {
+            Decoder_ProcessFrame();
+        }
+    }
+}
+
+// =========================================================
+// SETUP / LOOP
+// =========================================================
+void setup() {
+    Serial.begin(115200);
+    pinMode(RX_PIN, INPUT);
+    while (!Serial) {}
+
+    Serial.println("Modo: DECODER");
+}
+
+void loop() {
+    int lectura = digitalRead(RX_PIN);
+
+    if (lectura == HIGH && !estado_high) {
+        estado_high = true;
+        inicio_high = micros();
+    }
+
+    if (lectura == LOW && estado_high) {
+        estado_high = false;
+        unsigned long duracion = micros() - inicio_high;
+
+        Decoder_ProcessTime(duracion);
+    }
+}
