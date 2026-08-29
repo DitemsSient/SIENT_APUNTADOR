@@ -75,7 +75,7 @@ void Test_Buzzer(void) {
 #include "Transmsion_Laser_IR.h"
 #include "Multiplexor_CD4051B.h"
 
-bool laser_calibration_mode = false;
+extern bool laser_calibration_mode; /* definida en Inicializacion.c */
 mux_handle_t mux;
 
 void Test_LaserIR(uint8_t n_disparos) {

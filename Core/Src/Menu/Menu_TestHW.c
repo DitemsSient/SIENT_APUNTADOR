@@ -26,6 +26,7 @@
  */
 
 #include "Menu/Menu_Screens.h"
+#include "Logger.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include "Flash.h"
@@ -33,16 +34,16 @@
 #include "SensorLuz_TSL2571.h"
 #include "Bluetooth.h"
 #include "Buzzer.h"
-#include "LedRGB.h"
 #include "HWTest_Status.h"
 #include "LSM6DSO32TR.h"
 #include "MMC5983MA.h"
 #include "stm32l4xx_hal.h"
 #include <stdio.h>
+#include <string.h>
 
 extern HWTest_Status_t hw_status;
-extern LSM6DSO32TR_t   lsm;
-extern Bt_Handle_t     hbt;
+extern LSM6DSO32TR_t   Imu;
+extern Bt_Handle_t     Bluetooth;
 
 /* ========================  SUB-STATES  =================================== */
 
@@ -74,14 +75,12 @@ static const char *testhw_l1_labels[TESTHW_L1_COUNT] = {
 
 /* ========================  NIVEL 2 — SUITE MIRA  ========================= */
 
-#define TESTHW_MIRA_COUNT   6U
+#define TESTHW_MIRA_COUNT   4U
 
 static const char *testhw_mira_labels[TESTHW_MIRA_COUNT] = {
     "Autotest",
     "Sensores",
     "Buzzer",
-    "Vibrador",
-    "RGB",
     "Salir"
 };
 
@@ -113,8 +112,6 @@ static uint8_t sensor_pass_count = 0U;
 /* ========================  MANUAL TEST STATE  ============================= */
 
 #define MANUAL_BUZZER       0U
-#define MANUAL_VIBRADOR     1U
-#define MANUAL_RGB          2U
 
 static uint8_t manual_id          = 0U;
 static uint8_t manual_confirm_sel = 0U;  /* 0 = SI, 1 = NO */
@@ -146,6 +143,11 @@ static void show_step(const char *name, const char *status)
     ssd1306_printCentered(name,   8,  &Font5x7);
     ssd1306_printCentered(status, 20, &Font5x7);
     ssd1306_display();
+
+    /* Solo resultados, no pasos intermedios ("...", "Sonando...", etc.) */
+    if (strstr(status, "...") == NULL) {
+        Log_Printf("MENU", "%s: %s", name, status);
+    }
 }
 
 static void draw_list(const char **labels, uint8_t count, uint8_t selected, uint8_t offset)
@@ -181,19 +183,19 @@ static void draw_list(const char **labels, uint8_t count, uint8_t selected, uint
 
 static void sens_send_cmd(const char *cmd)
 {
-    Bt_ResetRx(&hbt);
+    Bt_ResetRx(&Bluetooth);
     uint8_t buf[16];
     uint8_t len = 0U;
     buf[len++] = '$';
     while (*cmd) { buf[len++] = (uint8_t)*cmd++; }
     buf[len++] = '\r';
-    Bt_Transmit(&hbt, buf, len);
+    Bt_Transmit(&Bluetooth, buf, len);
 }
 
 static void sens_parse_flags(void)
 {
     for (uint8_t i = 0U; i < SENS_AUTO_COUNT; i++) {
-        sens_auto_results[i] = (i < hbt.rx_count) && (hbt.rx_buffer[i] == '1');
+        sens_auto_results[i] = (i < Bluetooth.rx_count) && (Bluetooth.rx_buffer[i] == '1');
     }
     hw_status.sensores.gps   = sens_auto_results[0];
     hw_status.sensores.lora  = sens_auto_results[1];
@@ -237,10 +239,12 @@ static void sens_show_report(void)
     if (!hw_status.sensores.rgb)    fail_names[fail_count++] = "RGB";
 
     if (fail_count == 0U) {
+        Log_Print("MENU", "Sensores (BT): todo bien");
         show_step("Todo bien", ":)");
         HAL_Delay(2000U);
         return;
     }
+    Log_Printf("MENU", "Sensores (BT): %u fallo(s)", fail_count);
 
     uint8_t pages = (uint8_t)((fail_count + RESULT_PAGE_ITEMS - 1U) / RESULT_PAGE_ITEMS);
 
@@ -284,7 +288,7 @@ static void draw_confirm(void)
 
 static void show_autotest_result(void)
 {
-    const char *fail_names[9];
+    const char *fail_names[7];
     uint8_t     fail_count = 0U;
 
     if (!hw_status.mira.flash)          fail_names[fail_count++] = "Flash";
@@ -294,14 +298,14 @@ static void show_autotest_result(void)
     if (!hw_status.mira.bluetooth)      fail_names[fail_count++] = "Bluetooth";
     if (!hw_status.mira.imu)            fail_names[fail_count++] = "IMU";
     if (!hw_status.mira.buzzer)         fail_names[fail_count++] = "Buzzer";
-    if (!hw_status.mira.vibrador)       fail_names[fail_count++] = "Vibrador";
-    if (!hw_status.mira.rgb_driver)     fail_names[fail_count++] = "RGB";
 
     if (fail_count == 0U) {
+        Log_Print("MENU", "Autotest Mira: todo bien");
         show_step("Todo bien", ":)");
         HAL_Delay(2000U);
         return;
     }
+    Log_Printf("MENU", "Autotest Mira: %u fallo(s)", fail_count);
 
     uint8_t pages = (uint8_t)((fail_count + RESULT_PAGE_ITEMS - 1U) / RESULT_PAGE_ITEMS);
 
@@ -419,18 +423,6 @@ static void run_manual_act(void)
             Buzzer_Test();
             break;
 
-        case MANUAL_VIBRADOR:
-            /* TODO: no existe driver de vibrador (Motovibrador) en esta tarjeta
-             * todavia — revisar si se agrega o se quita del Test HW. Por ahora
-             * se marca como aprobado sin activar nada (ver autotest_wait_confirm
-             * y Screen_TestHW_OnButton, caso MANUAL_VIBRADOR). */
-            break;
-
-        case MANUAL_RGB:
-            show_step("RGB", "Ciclando...");
-            LedRGB_Test();
-            break;
-
         default:
             break;
     }
@@ -462,10 +454,7 @@ static void autotest_wait_confirm(Menu_Handle_t *h, uint8_t id)
 
     bool result = (manual_confirm_sel == 0U);
     switch (id) {
-        case MANUAL_BUZZER:   hw_status.mira.buzzer     = result; break;
-        /* TODO: sin driver de vibrador todavia — se fuerza aprobado, revisar. */
-        case MANUAL_VIBRADOR: hw_status.mira.vibrador   = true;   break;
-        case MANUAL_RGB:      hw_status.mira.rgb_driver = result; break;
+        case MANUAL_BUZZER: hw_status.mira.buzzer = result; break;
         default: break;
     }
 }
@@ -474,8 +463,6 @@ static void run_autotest_sequence(Menu_Handle_t *h)
 {
     run_sensors_only();
     autotest_wait_confirm(h, MANUAL_BUZZER);
-    autotest_wait_confirm(h, MANUAL_VIBRADOR);
-    autotest_wait_confirm(h, MANUAL_RGB);
     show_autotest_result();
 }
 
@@ -539,9 +526,9 @@ void Screen_TestHW_Draw(Menu_Handle_t *h)
 
         case TESTHW_SENS_ESPERANDO:
             show_step("Esperando", "...");
-            if (hbt.rx_ready) {
+            if (Bluetooth.rx_ready) {
                 sens_parse_flags();
-                Bt_ResetRx(&hbt);
+                Bt_ResetRx(&Bluetooth);
                 sens_show_results_sequence();
                 sens_manual_id  = SENS_MANUAL_BUZZER;
                 sens_send_cmd("BUZ");
@@ -650,17 +637,7 @@ void Screen_TestHW_OnButton(Menu_Handle_t *h, MenuButton_e btn)
                         h->sub_state    = TESTHW_MANUAL_ACT;
                         h->needs_redraw = true;
                         break;
-                    case 3U:  /* Vibrador */
-                        manual_id       = MANUAL_VIBRADOR;
-                        h->sub_state    = TESTHW_MANUAL_ACT;
-                        h->needs_redraw = true;
-                        break;
-                    case 4U:  /* RGB */
-                        manual_id       = MANUAL_RGB;
-                        h->sub_state    = TESTHW_MANUAL_ACT;
-                        h->needs_redraw = true;
-                        break;
-                    case 5U:  /* Salir — vuelve al nivel 1 */
+                    case 3U:  /* Salir — vuelve al nivel 1 */
                         h->selected     = 0U;
                         h->sub_state    = TESTHW_MENU;
                         h->needs_redraw = true;
@@ -678,10 +655,7 @@ void Screen_TestHW_OnButton(Menu_Handle_t *h, MenuButton_e btn)
             } else if (btn == BTN_ENTER) {
                 bool result = (manual_confirm_sel == 0U); /* 0=SI→true, 1=NO→false */
                 switch (manual_id) {
-                    case MANUAL_BUZZER:   hw_status.mira.buzzer     = result; break;
-                    /* TODO: sin driver de vibrador todavia — se fuerza aprobado, revisar. */
-                    case MANUAL_VIBRADOR: hw_status.mira.vibrador   = true;   break;
-                    case MANUAL_RGB:      hw_status.mira.rgb_driver = result; break;
+                    case MANUAL_BUZZER: hw_status.mira.buzzer = result; break;
                     default: break;
                 }
                 h->sub_state    = TESTHW_COMPLETED;

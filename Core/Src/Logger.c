@@ -9,6 +9,7 @@
 
 #include "Logger.h"
 #include "usbd_cdc_if.h"
+#include "cmsis_os2.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -17,6 +18,8 @@
 /* ========================  PRIVATE STATE  ================================= */
 
 static bool s_ready = false;
+static osMutexId_t s_mutex = NULL;
+static const osMutexAttr_t s_mutex_attr = { .name = "LogMutex" };
 
 /* ======================  STATIC FUNCTIONS  ================================ */
 
@@ -25,15 +28,23 @@ static bool s_ready = false;
  * @param  data  Buffer to transmit.
  * @param  len   Number of bytes.
  * @note   Gives up silently after LOG_TX_TIMEOUT_MS — logging must never
- *         hang the app if nothing is connected on the other end.
+ *         hang the app if nothing is connected on the other end. Protegido
+ *         por mutex si ya existe (ver Log_InitMutex).
  */
 static void Log_TransmitUSB(uint8_t *data, uint16_t len) {
-    uint32_t start = HAL_GetTick();
+    if (s_mutex != NULL) {
+        osMutexAcquire(s_mutex, osWaitForever);
+    }
 
+    uint32_t start = HAL_GetTick();
     while (CDC_Transmit_FS(data, len) == USBD_BUSY) {
         if ((HAL_GetTick() - start) > LOG_TX_TIMEOUT_MS) {
-            return;
+            break;
         }
+    }
+
+    if (s_mutex != NULL) {
+        osMutexRelease(s_mutex);
     }
 }
 
@@ -42,6 +53,13 @@ static void Log_TransmitUSB(uint8_t *data, uint16_t len) {
 void Log_Init(void)
 {
     s_ready = true;
+}
+
+void Log_InitMutex(void)
+{
+    if (s_mutex == NULL) {
+        s_mutex = osMutexNew(&s_mutex_attr);
+    }
 }
 
 void Log_Print(const char *tag, const char *msg)
@@ -61,6 +79,14 @@ void Log_Print(const char *tag, const char *msg)
     }
 
     Log_TransmitUSB((uint8_t *)out, (uint16_t)len);
+}
+
+void Log_NewLine(void)
+{
+    if (!s_ready) {
+        return;
+    }
+    Log_TransmitUSB((uint8_t *)"\r\n", 2U);
 }
 
 void Log_Printf(const char *tag, const char *fmt, ...)

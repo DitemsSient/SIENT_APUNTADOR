@@ -38,7 +38,7 @@
 #include <stdio.h>
 #include <string.h>
 
-extern Bt_Handle_t hbt;
+extern Bt_Handle_t Bluetooth;
 
 /* ========================  STATIC STATE  ================================== */
 
@@ -68,7 +68,7 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
 
             if (s_bt_linked) {
                 char line[MENU_MAX_CHARS + 1U];
-                snprintf(line, sizeof(line), "Id:%s", s_bt_id_str);
+                snprintf(line, sizeof(line), "Id:%.7s", s_bt_id_str);
                 ssd1306_setCursor(0, 0);
                 ssd1306_print(line, &Font5x7);
 
@@ -95,7 +95,7 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             ssd1306_printCentered(". . .",     18, &Font5x7);
             ssd1306_display();
 
-            Bt_SendAdvertise(&hbt);
+            Bt_SendAdvertise(&Bluetooth);
             h->sub_state   = (uint8_t)BT_BUSCANDO;
             h->splash_tick = HAL_GetTick();
             h->needs_redraw = true;
@@ -109,10 +109,10 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             ssd1306_printCentered(". . .",   18, &Font5x7);
             ssd1306_display();
 
-            if (hbt.rx_ready) {
-                if (hbt.rx_count == 2U &&
-                    hbt.rx_buffer[0] == 'O' && hbt.rx_buffer[1] == 'K') {
-                    Bt_ResetRx(&hbt);
+            if (Bluetooth.rx_ready) {
+                if (Bluetooth.rx_count == 2U &&
+                    Bluetooth.rx_buffer[0] == 'O' && Bluetooth.rx_buffer[1] == 'K') {
+                    Bt_ResetRx(&Bluetooth);
                     h->sub_state = (uint8_t)BT_ESPERANDO;
                 } else {
                     h->sub_state   = (uint8_t)BT_SPLASH_ERR;
@@ -133,13 +133,13 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             ssd1306_printCentered(". . .",    18, &Font5x7);
             ssd1306_display();
 
-            if (hbt.rx_ready) {
-                if (hbt.rx_count > 0U && hbt.rx_buffer[0] == '1') {
-                    uint16_t id_len = hbt.rx_count - 1U;
+            if (Bluetooth.rx_ready) {
+                if (Bluetooth.rx_count > 0U && Bluetooth.rx_buffer[0] == '1') {
+                    uint16_t id_len = Bluetooth.rx_count - 1U;
                     if (id_len >= sizeof(s_bt_id_str)) {
                         id_len = sizeof(s_bt_id_str) - 1U;
                     }
-                    memcpy(s_bt_id_str, &hbt.rx_buffer[1], id_len);
+                    memcpy(s_bt_id_str, &Bluetooth.rx_buffer[1], id_len);
                     s_bt_id_str[id_len] = '\0';
 
                     s_bt_linked     = true;

@@ -107,6 +107,18 @@ void Bt_ResetRx(Bt_Handle_t *h)
     memset(h->rx_buffer, 0, BT_RX_BUFFER_SIZE);
 }
 
+/**
+ * @brief  Enruta la recepción por IT de huart1 hacia Bt_StoreByte().
+ */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    extern Bt_Handle_t Bluetooth;
+
+    if (huart->Instance == USART1) {
+        Bt_StoreByte(&Bluetooth);
+    }
+}
+
 /* ========================  ADVERTISE API  ================================ */
 
 BtStatus_e Bt_SendAdvertise(Bt_Handle_t *h)
@@ -123,17 +135,17 @@ BtStatus_e Bt_SendAdvertise(Bt_Handle_t *h)
 
 uint8_t Bt_Test(void)
 {
-    extern Bt_Handle_t hbt;
+    extern Bt_Handle_t Bluetooth;
 
     static const uint8_t cmd[]  = "$AT\r";
     static       uint8_t resp[16];
 
-    Bt_Init(&hbt);
+    Bt_Init(&Bluetooth);
 
-    if (Bt_Transmit(&hbt, cmd, sizeof(cmd) - 1U) != BT_OK) { return 0U; }
+    if (Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U) != BT_OK) { return 0U; }
 
     memset(resp, 0, sizeof(resp));
-    HAL_UART_Receive(hbt.huart, resp, sizeof(resp) - 1U, BT_RX_TIMEOUT_MS);
+    HAL_UART_Receive(Bluetooth.huart, resp, sizeof(resp) - 1U, BT_RX_TIMEOUT_MS);
 
     /* Busca "OK" en la respuesta */
     for (uint8_t i = 0U; i < (uint8_t)(sizeof(resp) - 1U); i++) {

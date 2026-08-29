@@ -274,11 +274,13 @@ Datos: `MMC_Data_t { x/y/z_uT, x/y/z_raw }`.
 **SET pulse:** aplicado en `Init` y automáticamente en cada muestra (modo auto). Si se detecta saturación en cualquier eje durante `ReadAll`, se emite un SET adicional y se relee.
 
 **API:**
-- `MMC5983MA_Init()` — SET pulse + verifica ID + activa modo continuo con auto SR
+- `MMC5983MA_Init()` — SET pulse + verifica ID + activa modo continuo con auto SR + dispara TM_M inicial
 - `MMC5983MA_ReadAll(&out)` — burst de 7 bytes, ensambla 18 bits, convierte a µT; SET automático si satura
 - `MMC5983MA_Set()` — SET pulse manual (desgausado), bloquea 1 ms
 - `MMC5983MA_WhoAmI(&id)` — retorna 0x30
 - `MMC5983MA_Test()` — WHO_AM_I + lectura + validación de rango ±800 µT
+
+> **Bug corregido (28-ago-2026):** `Init()` habilitaba el modo continuo en `CTRL2` pero nunca disparaba la primera medición — el modo continuo solo arma el auto-repetido, necesita un `TM_M` (`CTRL0` bit 0) inicial para arrancar. Sin eso, `ReadAll()` siempre leía `raw=0` en los 3 ejes → convertía a exactamente `-800.0 µT` (el piso matemático de la fórmula). Ya corregido: `Init()` manda ese primer `TM_M` después de armar el modo continuo. Nota aparte: `CTRL0/1/2` parecen ser de solo-escritura en este chip — releerlos siempre dio `0x61` sin importar qué se escribiera, no sirven para verificar un write por readback.
 
 ---
 
@@ -330,6 +332,21 @@ PIN de bloqueo (pantalla Programming): `MENU_LOCK_CODE = {1,2,3}`.
 **Pantalla Test HW (`Menu_TestHW.c`):** implementada con sub-menú de dos niveles.
 Ver `memorias_proyecto.md` → sección "Pantalla: Test Hardware" para la arquitectura completa
 de sub_states, flujo automático/manual y menú deslizante.
+
+**Logging:** `Menu_Init()`/`Menu_GoTo()` imprimen `[MENU] Screen: <nombre>` en cada cambio de
+pantalla. `Menu_Update()` imprime `[MENU] Boton ENTER en <pantalla>` solo para ENTER (NAVIGATE
+se omite, muy ruidoso). Corre dentro de `MenuTask` (ver `Tareas_Interrupciones.c`).
+
+> **Bug corregido (28-ago-2026):** el Logger dejaba de imprimir por completo en cuanto arrancaba
+> el scheduler de FreeRTOS (la navegación del menú seguía funcionando bien, solo el log moría).
+> Causa real: `StartDefaultTask()` (el task placeholder que genera CubeMX junto con USB_DEVICE +
+> FreeRTOS) llamaba `MX_USB_DEVICE_Init()` una **segunda vez** apenas arrancaba el scheduler —
+> ya se inicializaba una vez en `Inicializacion_Run()` (pre-RTOS). El segundo init reseteaba el
+> stack USB/CDC mientras el host ya tenía la conexión activa, dejando `CDC_Transmit_FS()` roto en
+> silencio (sin bloquear nada, por eso el resto del sistema — GPIO/I2C — seguía funcionando).
+> Fix: se quitó esa llamada de `StartDefaultTask()`. **Ojo:** esa línea vive fuera de bloques
+> `USER CODE`, así que CubeMX la vuelve a insertar sola cada vez que regeneras código — hay que
+> quitarla de nuevo cada vez (confirmado que reaparece).
 
 ---
 

@@ -11,12 +11,27 @@
 #include "Menu/Menu_Screens.h"
 #include "ModoProgramacion.h"
 #include "Bluetooth.h"
+#include "Logger.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include "Display_Oled/Display_Bitmaps.h"
 #include <string.h>
 
-extern Bt_Handle_t hbt;
+/**
+ * @brief  Nombre corto de la pantalla, para logging.
+ */
+static const char *Menu_ScreenName(MenuScreen_e screen) {
+    switch (screen) {
+        case SCREEN_MAIN_MENU:   return "MAIN_MENU";
+        case SCREEN_TEST_HW:     return "TEST_HW";
+        case SCREEN_BLUETOOTH:   return "BLUETOOTH";
+        case SCREEN_PROGRAMMING: return "PROGRAMMING";
+        case SCREEN_EXERCISE:    return "EXERCISE";
+        default:                 return "?";
+    }
+}
+
+extern Bt_Handle_t Bluetooth;
 
 /* ========================  CONSTANTS  ==================================== */
 
@@ -108,6 +123,7 @@ void Menu_Init(Menu_Handle_t *h)
     memset(h, 0, sizeof(Menu_Handle_t));
     h->screen       = SCREEN_MAIN_MENU;
     h->needs_redraw = true;
+    Log_Printf("MENU", "Screen: %s", Menu_ScreenName(h->screen));
 }
 
 void Menu_GoTo(Menu_Handle_t *h, MenuScreen_e screen)
@@ -126,6 +142,8 @@ void Menu_GoTo(Menu_Handle_t *h, MenuScreen_e screen)
         h->sub_state = ModoProgramacion_IsBluetoothMode() ? (uint8_t)PROG_BT
                                                           : (uint8_t)PROG_MCU;
     }
+
+    Log_Printf("MENU", "Screen: %s", Menu_ScreenName(screen));
 }
 
 void Menu_OnButton(Menu_Handle_t *h, MenuButton_e btn)
@@ -159,11 +177,11 @@ void Menu_Poll(Menu_Handle_t *h)
 void Menu_Update(Menu_Handle_t *h)
 {
     /* Check for BT disconnection message ($DSCON\r) from any screen */
-    if (hbt.rx_ready && hbt.rx_count == 5U &&
-        hbt.rx_buffer[0] == 'D' && hbt.rx_buffer[1] == 'S' &&
-        hbt.rx_buffer[2] == 'C' && hbt.rx_buffer[3] == 'O' &&
-        hbt.rx_buffer[4] == 'N') {
-        Bt_ResetRx(&hbt);
+    if (Bluetooth.rx_ready && Bluetooth.rx_count == 5U &&
+        Bluetooth.rx_buffer[0] == 'D' && Bluetooth.rx_buffer[1] == 'S' &&
+        Bluetooth.rx_buffer[2] == 'C' && Bluetooth.rx_buffer[3] == 'O' &&
+        Bluetooth.rx_buffer[4] == 'N') {
+        Bt_ResetRx(&Bluetooth);
         h->bt_connected = false;
         Screen_Bluetooth_ResetLink();
 

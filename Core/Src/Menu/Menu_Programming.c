@@ -20,6 +20,7 @@
 
 #include "Menu/Menu_Screens.h"
 #include "ModoProgramacion.h"
+#include "Logger.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 
@@ -137,6 +138,7 @@ void Screen_Programming_OnButton(Menu_Handle_t *h, MenuButton_e btn)
         }
 
         /* Switch option selected */
+        Log_Print("PROG", "Opcion de cambio de modo seleccionada");
         if (h->sub_state == (uint8_t)PROG_MCU) {
             ModoProgramacion_SetBT();
             h->sub_state    = (uint8_t)PROG_SPLASH_BT;

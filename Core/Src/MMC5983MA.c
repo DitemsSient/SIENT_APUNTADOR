@@ -131,6 +131,11 @@ MMC_Status_e MMC5983MA_Init(void)
     status = MMC_WriteReg(MMC_REG_CTRL2, MMC_CTRL2_CMM_EN | MMC_ODR_ACTIVE);
     if (status != MMC_OK) return status;
 
+    /* El modo continuo solo arma el auto-repetido; hace falta un TM_M para
+     * disparar la primera medicion (las siguientes ya se repiten solas). */
+    status = MMC_WriteReg(MMC_REG_CTRL0, MMC_CTRL0_TM_M);
+    if (status != MMC_OK) return status;
+
     return MMC_OK;
 }
 

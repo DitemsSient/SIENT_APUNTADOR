@@ -37,8 +37,6 @@ typedef struct {
     bool imu;           /**< LSM6DSO32TR + MMC5983MA: ambos deben pasar       */
     /* --- Manual tests --- */
     bool buzzer;
-    bool vibrador;
-    bool rgb_driver;
 } HWMira_t;
 
 /* Test results for PCB Sensores (remote via BT) */

@@ -1,17 +1,22 @@
 /**
  * @file    Inicializacion.h
- * @brief   Secuencia de arranque de la tarjeta: bootloader, USB CDC y Logger.
+ * @brief   Secuencia de arranque del firmware real: inicializa todos los
+ *          periféricos/drivers de la tarjeta Mira, en orden, un módulo a
+ *          la vez.
  *
- * @details Agrupa, en el orden correcto, lo que antes vivía suelto en
- *          main.c: el chequeo de entrada al bootloader por software (debe
- *          ir primero y puede no regresar), la inicialización del USB CDC
- *          (solo si no se entró al bootloader — el USB debe quedar libre
- *          para que el bootloader lo tome) y la inicialización del Logger
- *          sobre ese mismo USB.
+ * @details Punto único de entrada para todo lo que main() necesita antes de
+ *          arrancar el juego. Cada módulo se activa/desactiva con su propio
+ *          INIT_xxx_ENABLE (1U/0U) — al quedar en 0U, tanto su #include como
+ *          su llamada de init se excluyen del build (ahorro real de flash/
+ *          RAM, no solo un "if" en tiempo de ejecución).
  *
- *          Requiere que MX_GPIO_Init() ya se haya llamado (para LedRGB) y
- *          que Inicializacion_Run() se llame antes que cualquier otro driver
- *          o prueba en main().
+ *          Orden de arranque:
+ *          1. Bootloader — SIEMPRE primero. Si el botón está presionado,
+ *             Inicializacion_Run() nunca regresa (salta al DFU de fábrica).
+ *          2. USB CDC + Logger — para poder ver mensajes de las siguientes
+ *             etapas de inicialización.
+ *          3. Resto de periféricos (se van agregando aquí conforme se
+ *             integran; por ahora todos deshabilitados).
  *
  * @date    August 27, 2026
  * @author  César Pérez
@@ -23,14 +28,93 @@
 
 #include "stm32l4xx_hal.h"
 
+/* ========================  CONFIGURATION  ================================= */
+
+/* Bootloader + USB CDC + Logger — infraestructura base, siempre activa.
+ * No se apagan con un flag porque sin ellas no hay forma de ver nada del
+ * resto de la inicialización. */
+
+#define INIT_BOOTLOADER_ENABLE      1U
+#define INIT_USB_LOGGER_ENABLE      1U
+
+/* Resto de periféricos/drivers — 1U para incluir su init en el build,
+ * 0U para excluirlo por completo (ahorra flash/RAM). Se van prendiendo
+ * conforme se integran a esta librería. */
+
+#define INIT_MODOPROGRAMACION_ENABLE 1U
+#define INIT_MULTIPLEXOR_ENABLE      1U
+#define INIT_FLASH_ENABLE            1U
+#define INIT_BUZZER_ENABLE           1U
+#define INIT_BLUETOOTH_ENABLE        1U
+#define INIT_IMU_ENABLE              1U
+#define INIT_MAGNETOMETRO_ENABLE     1U
+#define INIT_SENSORLUZ_ENABLE        1U
+#define INIT_BATTERYMONITOR_ENABLE   1U
+#define INIT_LASERIR_ENABLE          1U
+#define INIT_SENSORHALL_ENABLE       1U
+#define INIT_DISPLAY_ENABLE          1U
+
+/* ========================  GLOBAL STATE  =================================== */
+
+#if INIT_MULTIPLEXOR_ENABLE
+#include "Multiplexor_CD4051B.h"
+extern mux_handle_t Mux_Laser;
+#endif
+
+#if INIT_SENSORLUZ_ENABLE
+#include "SensorLuz_TSL2571.h"
+extern TSL2571_t SensorLuz;
+extern TSL2571_RawData_t SensorLuz_UltimaLectura;
+extern float SensorLuz_UltimoLux;
+#endif
+
+#if INIT_IMU_ENABLE
+#include "LSM6DSO32TR.h"
+extern LSM6DSO32TR_t Imu;
+extern LSM_Data_t Imu_UltimaLectura;
+#endif
+
+#if INIT_MAGNETOMETRO_ENABLE
+#include "MMC5983MA.h"
+extern MMC_Data_t Magnetometro_UltimaLectura;
+#endif
+
+/* ========================  MENU / ESTADO DE JUEGO  ========================= */
+
+#include "Menu/Menu.h"
+extern Menu_Handle_t hmenu;
+
+#include "HWTest_Status.h"
+extern HWTest_Status_t hw_status;
+
+#if INIT_BLUETOOTH_ENABLE
+#include "Bluetooth.h"
+extern Bt_Handle_t Bluetooth;
+#endif
+
+#if INIT_BATTERYMONITOR_ENABLE
+#include "BatteryMonitor.h"
+extern BatGauge_Data_t Bateria;
+#endif
+
 /* ================================  API  =================================== */
 
 /**
- * @brief  Corre la secuencia de arranque completa: Bootloader_CheckAndEnter(),
- *         MX_USB_DEVICE_Init() y Log_Init(), en ese orden.
+ * @brief  Corre la secuencia de arranque completa, en orden, según los
+ *         INIT_xxx_ENABLE definidos arriba.
  * @note   Llamar una sola vez en main(), dentro de USER CODE 2, antes de
- *         cualquier prueba o driver del juego.
+ *         cualquier otro código. Si el botón de bootloader está presionado,
+ *         esta función no regresa.
  */
 void Inicializacion_Run(void);
+
+/**
+ * @brief  Imprime el mensaje inicial por Logger (título del proyecto +
+ *         confirmación de que el USB/Logger quedó configurado).
+ * @note   Se llama una vez dentro de Inicializacion_Run(); expuesta también
+ *         para poder reimprimirla periódicamente desde main() mientras se
+ *         diagnostica si el terminal USB está enumerando a tiempo.
+ */
+void Inicializacion_PrintBanner(void);
 
 #endif /* INICIALIZACION_H */

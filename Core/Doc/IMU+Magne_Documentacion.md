@@ -83,11 +83,19 @@ En este driver el SET ocurre en tres momentos:
 2. **Automáticamente en cada medición** — el chip lo hace solo con el modo `AUTO_SR` habilitado (un bit de configuración, sin costo de tiempo)
 3. **Si se detecta saturación** — si algún eje llega al límite del rango (cerca de 0 o de 262143), `ReadAll()` emite un SET extra y relee los datos antes de retornar
 
+### Bug corregido — modo continuo no arrancaba solo
+
+`Init()` configuraba `CTRL2` con el modo continuo (`CMM_EN` + ODR), pero eso solo **arma** el mecanismo de auto-repetición — no dispara la primera medición. Sin un primer `TM_M` (Take Measurement, `CTRL0` bit 0), el sensor se quedaba esperando indefinidamente y `ReadAll()` siempre leía `raw=0` en los tres ejes (que convierte matemáticamente a exactamente `-800.0 µT`, el "piso" de la fórmula).
+
+Diagnóstico: escribir manualmente `CTRL0=TM_M` y releer sí producía datos válidos (`STATUS` marcaba `Meas_M_Done=1`, `XOUT` traía valores reales). `Init()` ahora manda ese primer `TM_M` justo después de habilitar el modo continuo — las siguientes mediciones ya se repiten solas a 10 Hz sin que el driver tenga que volver a dispararlas.
+
+Nota aparte del diagnóstico: `CTRL0`/`CTRL1`/`CTRL2` siempre se leyeron de vuelta como `0x61` sin importar qué se escribiera — parecen ser de **solo escritura** en este chip. No sirven para verificar una escritura por readback.
+
 ### API principal
 
 | Función | Descripción |
 |---|---|
-| `MMC5983MA_Init()` | SET pulse + verifica ID + activa modo continuo 10 Hz con auto SR |
+| `MMC5983MA_Init()` | SET pulse + verifica ID + activa modo continuo 10 Hz con auto SR + dispara TM_M inicial |
 | `MMC5983MA_ReadAll(&out)` | Burst de 7 bytes, ensambla 18 bits, convierte a µT |
 | `MMC5983MA_Set()` | SET pulse manual (si se expuso a un imán fuerte) |
 | `MMC5983MA_WhoAmI(&id)` | Lee Product ID, espera 0x30 |

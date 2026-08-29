@@ -5,17 +5,26 @@
  * @details Provides Log_Print()/Log_Printf() for any driver or module to
  *          emit tagged text messages to a terminal connected to the board's
  *          USB CDC port (see USB_DEVICE/App/usbd_cdc_if.c, CDC_Transmit_FS).
- *          Thread-safety: none — a RTOS mutex should be added later.
+ *
+ *          Thread-safety: Log_TransmitUSB() (the actual CDC_Transmit_FS()
+ *          call) is protected by an internal RTOS mutex so two tasks can't
+ *          interleave their output on the shared USB endpoint. The mutex
+ *          must be created with Log_InitMutex() AFTER osKernelInitialize()
+ *          — see main.c, USER CODE BEGIN RTOS_MUTEX. Until that runs, calls
+ *          are unlocked (safe, since only single-threaded code — bootloader/
+ *          Inicializacion_Run() — logs before the scheduler exists).
  *
  *          Usage:
- *            main.c  → call Log_Init() once after MX_USB_DEVICE_Init().
+ *            main.c  → call Log_Init() once after MX_USB_DEVICE_Init()
+ *                      (pre-RTOS, inside Inicializacion_Run()), then
+ *                      Log_InitMutex() once after osKernelInitialize().
  *                      Only reached when Bootloader_CheckAndEnter() did NOT
  *                      jump to the DFU bootloader (see Bootloader.h).
  *            others  → #include "Logger.h" and call Log_Print(TAG, msg).
  *
  * @date    July 03, 2026
  * @author  César Pérez
- * @version 2.0.0
+ * @version 3.0.0
  */
 
 #ifndef LOGGER_H
@@ -42,6 +51,13 @@ extern "C" {
 void Log_Init(void);
 
 /**
+ * @brief  Crea el mutex interno del Logger.
+ * @note   Llamar despues de osKernelInitialize() (no antes -- el kernel
+ *         debe estar listo para crear objetos RTOS). Ver Tareas_Interrupciones.c.
+ */
+void Log_InitMutex(void);
+
+/**
  * @brief  Prints a tagged log message over USB CDC.
  * @param  tag  Short module identifier, e.g. "BT", "I2C", "TEST".
  * @param  msg  Message string (NUL-terminated).
@@ -60,6 +76,12 @@ void Log_Print(const char *tag, const char *msg);
  * Output format:  [TAG] formatted message\r\n
  */
 void Log_Printf(const char *tag, const char *fmt, ...);
+
+/**
+ * @brief  Prints a blank line (just "\r\n"), no tag.
+ * @note   Usado como separador visual entre secciones del log.
+ */
+void Log_NewLine(void);
 
 #ifdef __cplusplus
 }

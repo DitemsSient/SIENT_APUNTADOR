@@ -8,6 +8,7 @@
  */
 
 #include "ModoProgramacion.h"
+#include "Logger.h"
 
 /* ========================  GLOBAL STATE  ================================== */
 
@@ -24,6 +25,7 @@ ModoProg_Status_e ModoProgramacion_Init(void)
 {
     HAL_GPIO_WritePin(MODOPROG_PORT, MODOPROG_PIN, GPIO_PIN_RESET);
     ModoProg_CurrentMode = MODOPROG_MODE_MCU;
+    Log_Print("PROG", "Mux en modo MCU: UART1-BLE y SWD-MCU activos");
     return MODOPROG_OK;
 }
 
@@ -34,6 +36,7 @@ void ModoProgramacion_SetBT(void)
 {
     HAL_GPIO_WritePin(MODOPROG_PORT, MODOPROG_PIN, GPIO_PIN_SET);
     ModoProg_CurrentMode = MODOPROG_MODE_BT;
+    Log_Print("PROG", "Mux en modo BLE: SWD-BLE activo, UART1 desconectado");
 }
 
 /**
@@ -43,6 +46,7 @@ void ModoProgramacion_SetMCU(void)
 {
     HAL_GPIO_WritePin(MODOPROG_PORT, MODOPROG_PIN, GPIO_PIN_RESET);
     ModoProg_CurrentMode = MODOPROG_MODE_MCU;
+    Log_Print("PROG", "Mux en modo MCU: UART1-BLE y SWD-MCU activos");
 }
 
 /**
