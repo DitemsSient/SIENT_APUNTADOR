@@ -27,6 +27,7 @@
 
 #include "Menu/Menu_Screens.h"
 #include "Logger.h"
+#include "Inicializacion.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include "Flash.h"
@@ -34,6 +35,7 @@
 #include "SensorLuz_TSL2571.h"
 #include "Bluetooth.h"
 #include "Buzzer.h"
+#include "LedRGB.h"
 #include "HWTest_Status.h"
 #include "LSM6DSO32TR.h"
 #include "MMC5983MA.h"
@@ -75,12 +77,13 @@ static const char *testhw_l1_labels[TESTHW_L1_COUNT] = {
 
 /* ========================  NIVEL 2 — SUITE MIRA  ========================= */
 
-#define TESTHW_MIRA_COUNT   4U
+#define TESTHW_MIRA_COUNT   5U
 
 static const char *testhw_mira_labels[TESTHW_MIRA_COUNT] = {
     "Autotest",
     "Sensores",
     "Buzzer",
+    "RGB",
     "Salir"
 };
 
@@ -98,11 +101,11 @@ typedef struct {
 
 static AutoTest_t sensor_tests[] = {
     { "Flash",     0U },
-    { "Hall",      0U },
     { "Luz Amb.",  0U },
-    { "RS485",     0U },
     { "Bluetooth", 0U },
-    { "IMU",       0U },
+    { "Magnet.",   0U },
+    { "Girosc.",   0U },
+    { "Bateria",   0U },
 };
 
 #define SENSOR_TEST_COUNT   ((uint8_t)(sizeof(sensor_tests) / sizeof(sensor_tests[0])))
@@ -112,6 +115,7 @@ static uint8_t sensor_pass_count = 0U;
 /* ========================  MANUAL TEST STATE  ============================= */
 
 #define MANUAL_BUZZER       0U
+#define MANUAL_RGB          1U
 
 static uint8_t manual_id          = 0U;
 static uint8_t manual_confirm_sel = 0U;  /* 0 = SI, 1 = NO */
@@ -146,7 +150,7 @@ static void show_step(const char *name, const char *status)
 
     /* Solo resultados, no pasos intermedios ("...", "Sonando...", etc.) */
     if (strstr(status, "...") == NULL) {
-        Log_Printf("MENU", "%s: %s", name, status);
+        Log_Printf("TESTHW", "%s: %s", name, status);
     }
 }
 
@@ -239,12 +243,12 @@ static void sens_show_report(void)
     if (!hw_status.sensores.rgb)    fail_names[fail_count++] = "RGB";
 
     if (fail_count == 0U) {
-        Log_Print("MENU", "Sensores (BT): todo bien");
+        Log_Print("TESTHW", "Sensores (BT): todo bien");
         show_step("Todo bien", ":)");
         HAL_Delay(2000U);
         return;
     }
-    Log_Printf("MENU", "Sensores (BT): %u fallo(s)", fail_count);
+    Log_Printf("TESTHW", "Sensores (BT): %u fallo(s)", fail_count);
 
     uint8_t pages = (uint8_t)((fail_count + RESULT_PAGE_ITEMS - 1U) / RESULT_PAGE_ITEMS);
 
@@ -288,24 +292,25 @@ static void draw_confirm(void)
 
 static void show_autotest_result(void)
 {
-    const char *fail_names[7];
+    const char *fail_names[8];
     uint8_t     fail_count = 0U;
 
     if (!hw_status.mira.flash)          fail_names[fail_count++] = "Flash";
-    if (!hw_status.mira.hall)           fail_names[fail_count++] = "Hall";
     if (!hw_status.mira.luz_ambiental)  fail_names[fail_count++] = "Luz Amb.";
-    if (!hw_status.mira.rs485)          fail_names[fail_count++] = "RS485";
     if (!hw_status.mira.bluetooth)      fail_names[fail_count++] = "Bluetooth";
-    if (!hw_status.mira.imu)            fail_names[fail_count++] = "IMU";
+    if (!hw_status.mira.magnetometro)   fail_names[fail_count++] = "Magnet.";
+    if (!hw_status.mira.giroscopio)     fail_names[fail_count++] = "Girosc.";
+    if (!hw_status.mira.batterymonitor) fail_names[fail_count++] = "Bateria";
     if (!hw_status.mira.buzzer)         fail_names[fail_count++] = "Buzzer";
+    if (!hw_status.mira.rgb_driver)     fail_names[fail_count++] = "RGB";
 
     if (fail_count == 0U) {
-        Log_Print("MENU", "Autotest Mira: todo bien");
+        Log_Print("TESTHW", "Autotest Mira: todo bien");
         show_step("Todo bien", ":)");
         HAL_Delay(2000U);
         return;
     }
-    Log_Printf("MENU", "Autotest Mira: %u fallo(s)", fail_count);
+    Log_Printf("TESTHW", "Autotest Mira: %u fallo(s)", fail_count);
 
     uint8_t pages = (uint8_t)((fail_count + RESULT_PAGE_ITEMS - 1U) / RESULT_PAGE_ITEMS);
 
@@ -337,70 +342,65 @@ static void run_sensors_only(void)
     sensor_pass_count = 0U;
     uint8_t ok;
 
+    /* Resultados reales, tomados del diagnostico de Inicializacion_Run()
+     * (arranque del sistema) en vez de valores fijos. */
+
     /* --- Flash MX25L6445E --- */
     show_step(sensor_tests[0].name, "...");
     HAL_Delay(1000U);
-    // ok = Flash_Test();
-    ok = 1U;
+    ok = Diagnostico.flash ? 1U : 0U;
     sensor_tests[0].passed = ok;
     hw_status.mira.flash = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[0].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
 
-    /* --- Sensor Hall --- */
+    /* --- Sensor de luz ambiental --- */
     show_step(sensor_tests[1].name, "...");
     HAL_Delay(1000U);
-    // ok = HallSensor_Test();
-    ok = 1U;
+    ok = Diagnostico.sensorluz ? 1U : 0U;
     sensor_tests[1].passed = ok;
-    hw_status.mira.hall = (ok == 1U);
+    hw_status.mira.luz_ambiental = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[1].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
 
-    /* --- Sensor de luz ambiental --- */
+    /* --- Bluetooth BL654 --- */
     show_step(sensor_tests[2].name, "...");
     HAL_Delay(1000U);
-    // ok = TSL2571_Test();
-    ok = 1U;
+    ok = Diagnostico.bluetooth ? 1U : 0U;
     sensor_tests[2].passed = ok;
-    hw_status.mira.luz_ambiental = (ok == 1U);
+    hw_status.mira.bluetooth = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[2].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
 
-    /* --- RS485 --- */
+    /* --- Magnetometro MMC5983MA --- */
     show_step(sensor_tests[3].name, "...");
     HAL_Delay(1000U);
-    // ok = RS485_Test();
-    ok = 1U;
+    ok = Diagnostico.magnetometro ? 1U : 0U;
     sensor_tests[3].passed = ok;
-    hw_status.mira.rs485 = (ok == 1U);
+    hw_status.mira.magnetometro = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[3].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
 
-    /* --- Bluetooth BL654 --- */
+    /* --- Giroscopio LSM6DSO32TR (accel + gyro) --- */
     show_step(sensor_tests[4].name, "...");
     HAL_Delay(1000U);
-    // ok = Bt_Test();
-    ok = 1U;
+    ok = Diagnostico.imu ? 1U : 0U;
     sensor_tests[4].passed = ok;
-    hw_status.mira.bluetooth = (ok == 1U);
+    hw_status.mira.giroscopio = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[4].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
 
-    /* --- IMU: LSM6DSO32TR (accel + gyro) + MMC5983MA (mag) --- */
+    /* --- BatteryMonitor BQ27441 --- */
     show_step(sensor_tests[5].name, "...");
     HAL_Delay(1000U);
-    // uint8_t ok_lsm = LSM6DSO32TR_Test(&lsm);
-    // uint8_t ok_mmc = MMC5983MA_Test();
-    // ok = (ok_lsm == 1U) && (ok_mmc == 1U) ? 1U : 0U;
-    ok = 1U;
+    ok = Diagnostico.batterymonitor ? 1U : 0U;
     sensor_tests[5].passed = ok;
-    hw_status.mira.imu = (ok == 1U);
+    hw_status.mira.batterymonitor = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[5].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
@@ -408,6 +408,7 @@ static void run_sensors_only(void)
 
 static void run_sensor_tests(void)
 {
+    Log_Print("TESTHW", "==== TEST Autodiagnostico ====");
     run_sensors_only();
     show_step("Completado", "");
     HAL_Delay(2000U);
@@ -421,6 +422,11 @@ static void run_manual_act(void)
         case MANUAL_BUZZER:
             show_step("Buzzer", "Sonando...");
             Buzzer_Test();
+            break;
+
+        case MANUAL_RGB:
+            show_step("RGB", "Ciclando...");
+            LedRGB_Test();
             break;
 
         default:
@@ -454,15 +460,24 @@ static void autotest_wait_confirm(Menu_Handle_t *h, uint8_t id)
 
     bool result = (manual_confirm_sel == 0U);
     switch (id) {
-        case MANUAL_BUZZER: hw_status.mira.buzzer = result; break;
+        case MANUAL_BUZZER:
+            hw_status.mira.buzzer = result;
+            Log_Printf("TESTHW", "Buzzer: %s", result ? "Correct" : "Fail");
+            break;
+        case MANUAL_RGB:
+            hw_status.mira.rgb_driver = result;
+            Log_Printf("TESTHW", "RGB: %s", result ? "Correct" : "Fail");
+            break;
         default: break;
     }
 }
 
 static void run_autotest_sequence(Menu_Handle_t *h)
 {
+    Log_Print("TESTHW", "==== TEST Autodiagnostico ====");
     run_sensors_only();
     autotest_wait_confirm(h, MANUAL_BUZZER);
+    autotest_wait_confirm(h, MANUAL_RGB);
     show_autotest_result();
 }
 
@@ -637,7 +652,12 @@ void Screen_TestHW_OnButton(Menu_Handle_t *h, MenuButton_e btn)
                         h->sub_state    = TESTHW_MANUAL_ACT;
                         h->needs_redraw = true;
                         break;
-                    case 3U:  /* Salir — vuelve al nivel 1 */
+                    case 3U:  /* RGB */
+                        manual_id       = MANUAL_RGB;
+                        h->sub_state    = TESTHW_MANUAL_ACT;
+                        h->needs_redraw = true;
+                        break;
+                    case 4U:  /* Salir — vuelve al nivel 1 */
                         h->selected     = 0U;
                         h->sub_state    = TESTHW_MENU;
                         h->needs_redraw = true;
@@ -655,7 +675,14 @@ void Screen_TestHW_OnButton(Menu_Handle_t *h, MenuButton_e btn)
             } else if (btn == BTN_ENTER) {
                 bool result = (manual_confirm_sel == 0U); /* 0=SI→true, 1=NO→false */
                 switch (manual_id) {
-                    case MANUAL_BUZZER: hw_status.mira.buzzer = result; break;
+                    case MANUAL_BUZZER:
+                        hw_status.mira.buzzer = result;
+                        Log_Printf("TESTHW", "Buzzer: %s", result ? "Correct" : "Fail");
+                        break;
+                    case MANUAL_RGB:
+                        hw_status.mira.rgb_driver = result;
+                        Log_Printf("TESTHW", "RGB: %s", result ? "Correct" : "Fail");
+                        break;
                     default: break;
                 }
                 h->sub_state    = TESTHW_COMPLETED;

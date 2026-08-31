@@ -115,7 +115,7 @@ void LedRGB_PlayPattern(const RGBStep_t *pattern, uint16_t length) {
 
 /* ========================  SELF-TEST  ==================================== */
 
-#define RGB_TEST_STEP_MS    1500U
+#define RGB_TEST_STEP_MS    600U
 #define RGB_TEST_CYCLES     2U
 
 void LedRGB_Test(void)

@@ -109,6 +109,7 @@ MMC_Data_t Magnetometro_UltimaLectura;
 
 Menu_Handle_t hmenu;
 HWTest_Status_t hw_status;
+Diagnostico_t Diagnostico;
 
 ExerciseGameData_t g_exercise_data = {
     .lives       = 35U,
@@ -175,6 +176,7 @@ BatGauge_Data_t Bateria;
  */
 static void Inicializacion_ScanI2C(void) {
     bool encontrado[128] = { false };
+    bool todos_ok = true;
 
     Log_Print("I2C", "Escaneando bus I2C1...");
     for (uint16_t addr = 1U; addr < 127U; addr++) {
@@ -193,8 +195,11 @@ static void Inicializacion_ScanI2C(void) {
             Log_Printf("I2C", "0x%02X %s encontrado", addr, nombre);
         } else {
             Log_Printf("I2C", "0x%02X %s NO encontrado", addr, nombre);
+            todos_ok = false;
         }
     }
+
+    Diagnostico.i2c_completo = todos_ok;
 }
 
 /**
@@ -216,6 +221,24 @@ void Inicializacion_PrintBanner(void) {
     Log_Print("SIENT", "========================================");
     Log_Print("SIENT", "USB configurado en modo Logger correctamente.");
     Log_Print("SIENT", "Modo normal activado.");
+}
+
+void Inicializacion_PrintDiagnostico(void) {
+    Log_Print("DIAG", "---- Estado de Diagnostico ----");
+    Log_Printf("DIAG", "ModoProgramacion: %s", Diagnostico.modoprogramacion ? "OK" : "FALLO");
+    Log_Printf("DIAG", "Multiplexor:      %s", Diagnostico.multiplexor     ? "OK" : "FALLO");
+    Log_Printf("DIAG", "Flash:            %s", Diagnostico.flash           ? "OK" : "FALLO");
+    Log_Printf("DIAG", "Buzzer:           %s", Diagnostico.buzzer          ? "OK" : "FALLO");
+    Log_Printf("DIAG", "Bluetooth:        %s", Diagnostico.bluetooth       ? "OK" : "FALLO");
+    Log_Printf("DIAG", "IMU:              %s", Diagnostico.imu             ? "OK" : "FALLO");
+    Log_Printf("DIAG", "Magnetometro:     %s", Diagnostico.magnetometro    ? "OK" : "FALLO");
+    Log_Printf("DIAG", "SensorLuz:        %s", Diagnostico.sensorluz       ? "OK" : "FALLO");
+    Log_Printf("DIAG", "BatteryMonitor:   %s", Diagnostico.batterymonitor  ? "OK" : "FALLO");
+    Log_Printf("DIAG", "LaserIR:          %s", Diagnostico.laserir         ? "OK" : "FALLO");
+    Log_Printf("DIAG", "SensorHall:       %s", Diagnostico.sensorhall      ? "OK" : "FALLO");
+    Log_Printf("DIAG", "Display:          %s", Diagnostico.display         ? "OK" : "FALLO");
+    Log_Printf("DIAG", "I2C completo:     %s", Diagnostico.i2c_completo    ? "OK" : "FALLO");
+    Log_Print("DIAG", "--------------------------------");
 }
 
 void Inicializacion_Run(void) {
@@ -245,12 +268,13 @@ void Inicializacion_Run(void) {
 
 #if INIT_MODOPROGRAMACION_ENABLE
     ModoProgramacion_Init();
+    Diagnostico.modoprogramacion = true;
     Log_NewLine();
     HAL_Delay(500U);
 #endif
 
 #if INIT_MULTIPLEXOR_ENABLE
-    MUX_Init(&Mux_Laser);
+    Diagnostico.multiplexor = (MUX_Init(&Mux_Laser) == MUX_OK);
     Log_Print("MUX", "Multiplexor inicializado en canal 0");
     Log_NewLine();
     HAL_Delay(500U);
@@ -262,6 +286,7 @@ void Inicializacion_Run(void) {
         Log_Print("FLASH", "Init OK, corriendo self-test...");
         if (Flash_Test()) {
             Log_Print("FLASH", "Test inicial verificado");
+            Diagnostico.flash = true;
         } else {
             Log_Print("FLASH", "Self-test FALLO");
         }
@@ -279,6 +304,7 @@ void Inicializacion_Run(void) {
     HAL_Delay(1000);
     Buzzer_PlayMelody(alert, MELODY_LEN(alert), 160U);
     Log_Print("BUZZER", "Buzzer inicializado");
+    Diagnostico.buzzer = true;
     Log_NewLine();
     HAL_Delay(500U);
 #endif
@@ -290,6 +316,7 @@ void Inicializacion_Run(void) {
         Log_Printf("IMU", "accel(g)=%.2f,%.2f,%.2f gyro(dps)=%.2f,%.2f,%.2f",
                    Imu_UltimaLectura.ax_g, Imu_UltimaLectura.ay_g, Imu_UltimaLectura.az_g,
                    Imu_UltimaLectura.gx_dps, Imu_UltimaLectura.gy_dps, Imu_UltimaLectura.gz_dps);
+        Diagnostico.imu = true;
     } else {
         Log_Print("IMU", "Init FALLO");
     }
@@ -304,6 +331,7 @@ void Inicializacion_Run(void) {
         MMC5983MA_ReadAll(&Magnetometro_UltimaLectura);
         Log_Printf("MAG", "X=%.1fuT Y=%.1fuT Z=%.1fuT", Magnetometro_UltimaLectura.x_uT,
                    Magnetometro_UltimaLectura.y_uT, Magnetometro_UltimaLectura.z_uT);
+        Diagnostico.magnetometro = true;
     } else {
         Log_Print("MAG", "Init FALLO");
     }
@@ -318,6 +346,7 @@ void Inicializacion_Run(void) {
         TSL2571_ReadLux(&SensorLuz, 1U, 200U, &SensorLuz_UltimoLux, &SensorLuz_UltimaLectura);
         Log_Printf("LUZ", "CH0=%u CH1=%u Lux=%.1f", SensorLuz_UltimaLectura.ch0,
                    SensorLuz_UltimaLectura.ch1, SensorLuz_UltimoLux);
+        Diagnostico.sensorluz = true;
     } else {
         Log_Print("LUZ", "Init FALLO");
     }
@@ -328,6 +357,7 @@ void Inicializacion_Run(void) {
 #if INIT_BATTERYMONITOR_ENABLE
     Log_Print("BAT", "Inicializando BatteryMonitor...");
     if (BatGauge_Init() == HAL_OK) {
+        Diagnostico.batterymonitor = true;
         BatGauge_Update(&Bateria);
         if (Bateria.is_ready) {
             Log_Printf("BAT", "V=%umV I=%dmA SOC=%u%%", Bateria.voltage_mV,
@@ -352,12 +382,14 @@ void Inicializacion_Run(void) {
     HAL_TIM_PWM_Start(&Tx_IR_TIM_HANDLE, Tx_IR_TIM_CHANNEL);
     Tx_IR_Init();
     Log_Print("LASER", "Laser IR listo (idle)");
+    Diagnostico.laserir = true;
     Log_NewLine();
     HAL_Delay(500U);
 #endif
 
 #if INIT_SENSORHALL_ENABLE
     Log_Print("HALL", "Periferico inicializado para leer el sensor de efecto Hall");
+    Diagnostico.sensorhall = true;
     Log_NewLine();
     HAL_Delay(500U);
 #endif
@@ -366,6 +398,7 @@ void Inicializacion_Run(void) {
     Log_Print("BT", "Probando comunicacion AT...");
     if (Bt_Test()) {
         Log_Print("BT", "Respuesta OK");
+        Diagnostico.bluetooth = true;
     } else {
         Log_Print("BT", "Sin respuesta");
     }
@@ -376,10 +409,14 @@ void Inicializacion_Run(void) {
 #if INIT_DISPLAY_ENABLE
     Log_Print("LCD", "Inicializando display OLED...");
     ssd1306_begin(SSD1306_SWITCHCAPVCC, 0x3CU);
+    Diagnostico.display = true;
     ssd1306_clearDisplay();
     ssd1306_drawBitmap(0, 0, bitmap_Logo_SIENT, 64, 32, WHITE);
     ssd1306_display();
     Log_Print("LCD", "Logo mostrado, esperando boton A/B...");
+    Log_NewLine();
+    Inicializacion_PrintDiagnostico();
+    Log_NewLine();
 
     while ((HAL_GPIO_ReadPin(BOTON_A_GPIO_Port, BOTON_A_Pin) == GPIO_PIN_SET) &&
            (HAL_GPIO_ReadPin(BOTON_B_GPIO_Port, BOTON_B_Pin) == GPIO_PIN_SET)) {

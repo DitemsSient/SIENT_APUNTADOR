@@ -97,6 +97,33 @@ extern Bt_Handle_t Bluetooth;
 extern BatGauge_Data_t Bateria;
 #endif
 
+/* ========================  DIAGNOSTICO  ===================================== */
+
+/* Un bool por componente: true si su init/self-test paso en el arranque.
+ * Queda en false (default) si el componente esta deshabilitado por su
+ * INIT_xxx_ENABLE o si fallo. i2c_completo: true solo si TODOS los
+ * dispositivos I2C esperados respondieron en el escaneo. */
+
+#include <stdbool.h>
+
+typedef struct {
+    bool modoprogramacion;
+    bool multiplexor;
+    bool flash;
+    bool buzzer;
+    bool bluetooth;
+    bool imu;
+    bool magnetometro;
+    bool sensorluz;
+    bool batterymonitor;
+    bool laserir;
+    bool sensorhall;
+    bool display;
+    bool i2c_completo;
+} Diagnostico_t;
+
+extern Diagnostico_t Diagnostico;
+
 /* ================================  API  =================================== */
 
 /**
@@ -116,5 +143,11 @@ void Inicializacion_Run(void);
  *         diagnostica si el terminal USB está enumerando a tiempo.
  */
 void Inicializacion_PrintBanner(void);
+
+/**
+ * @brief  Imprime por Logger el estado de Diagnostico completo (un OK/FALLO
+ *         por componente). Util como snapshot rapido de que sigue vivo.
+ */
+void Inicializacion_PrintDiagnostico(void);
 
 #endif /* INICIALIZACION_H */

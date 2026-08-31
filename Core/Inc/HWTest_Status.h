@@ -30,13 +30,14 @@
 typedef struct {
     /* --- Automatic tests (Sensores) --- */
     bool flash;
-    bool hall;
     bool luz_ambiental;
-    bool rs485;
     bool bluetooth;
-    bool imu;           /**< LSM6DSO32TR + MMC5983MA: ambos deben pasar       */
+    bool magnetometro;      /**< MMC5983MA */
+    bool giroscopio;        /**< LSM6DSO32TR (accel + gyro) */
+    bool batterymonitor;    /**< BQ27441 */
     /* --- Manual tests --- */
     bool buzzer;
+    bool rgb_driver;
 } HWMira_t;
 
 /* Test results for PCB Sensores (remote via BT) */
