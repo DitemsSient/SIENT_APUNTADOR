@@ -11,6 +11,7 @@
 #include "cmsis_os2.h"
 #include "Logger.h"
 #include "Inicializacion.h"
+#include "Transmsion_Laser_IR.h"
 
 /* ===========================================================================
  *  MenuTask
@@ -18,6 +19,7 @@
  */
 
 #define MENU_TASK_PERIOD_MS   20U
+#define CAL_SEND_PERIOD_MS    3000U
 
 static osThreadId_t s_menuTaskHandle;
 static const osThreadAttr_t s_menuTask_attr = {
@@ -31,10 +33,19 @@ static const osThreadAttr_t s_menuTask_attr = {
  */
 static void MenuTask(void *argument) {
     (void)argument;
+    static uint32_t s_cal_tick = 0U;
 
     for (;;) {
         Menu_Poll(&hmenu);
         Menu_Update(&hmenu);
+
+        uint32_t now = HAL_GetTick();
+        if ((now - s_cal_tick) >= CAL_SEND_PERIOD_MS) {
+            s_cal_tick = now;
+            Tx_IR_SendCalibration();
+            Log_Print("GATILLO", "Calibracion enviada (0xAA55)");
+        }
+
         osDelay(MENU_TASK_PERIOD_MS);
     }
 }

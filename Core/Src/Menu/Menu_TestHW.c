@@ -45,7 +45,9 @@
 #include <string.h>
 
 extern HWTest_Status_t hw_status;
+#if INIT_IMU_ENABLE
 extern LSM6DSO32TR_t   Imu;
+#endif
 extern Bt_Handle_t     Bluetooth;
 
 /* ========================  SUB-STATES  =================================== */
@@ -357,7 +359,11 @@ static void run_sensors_only(void)
 
     /* --- Sensor de luz ambiental --- */
     show_step(sensor_tests[1].name, "...");
+#if INIT_SENSORLUZ_ENABLE
     ok = TSL2571_Test();
+#else
+    ok = 0U;
+#endif
     sensor_tests[1].passed = ok;
     hw_status.mira.luz_ambiental = (ok == 1U);
     if (ok) { sensor_pass_count++; }
@@ -384,7 +390,11 @@ static void run_sensors_only(void)
 
     /* --- Giroscopio LSM6DSO32TR (accel + gyro) --- */
     show_step(sensor_tests[4].name, "...");
+#if INIT_IMU_ENABLE
     ok = LSM6DSO32TR_Test(&Imu);
+#else
+    ok = 0U;
+#endif
     sensor_tests[4].passed = ok;
     hw_status.mira.giroscopio = (ok == 1U);
     if (ok) { sensor_pass_count++; }
@@ -393,8 +403,12 @@ static void run_sensors_only(void)
 
     /* --- BatteryMonitor BQ27441 (sin self-test dedicado, se lee en vivo) --- */
     show_step(sensor_tests[5].name, "...");
+#if INIT_BATTERYMONITOR_ENABLE
     BatGauge_Update(&Bateria);
     ok = Bateria.is_ready ? 1U : 0U;
+#else
+    ok = 0U;
+#endif
     sensor_tests[5].passed = ok;
     hw_status.mira.batterymonitor = (ok == 1U);
     if (ok) { sensor_pass_count++; }

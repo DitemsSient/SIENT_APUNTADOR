@@ -176,18 +176,12 @@ void Menu_Poll(Menu_Handle_t *h)
 
 void Menu_Update(Menu_Handle_t *h)
 {
-    /* Check for BT disconnection message ($DSCON\r) from any screen */
-    if (Bluetooth.rx_ready) {
-        Log_Printf("MENU", "BT rx (global): \"%s\" (%u bytes)",
-                   (char *)Bluetooth.rx_buffer, Bluetooth.rx_count);
-    }
-
-    /* >= 5 en vez de == 5: tolera ruido/bytes extra al final del frame */
+    /* Check for BT disconnection message ($DSCON\r) from any screen.
+     * >= 5 en vez de == 5: tolera ruido/bytes extra al final del frame. */
     if (Bluetooth.rx_ready && Bluetooth.rx_count >= 5U &&
         Bluetooth.rx_buffer[0] == 'D' && Bluetooth.rx_buffer[1] == 'S' &&
         Bluetooth.rx_buffer[2] == 'C' && Bluetooth.rx_buffer[3] == 'O' &&
         Bluetooth.rx_buffer[4] == 'N') {
-        Log_Print("MENU", "DSCON detectado -- desconectando");
         Bt_ResetRx(&Bluetooth);
         h->bt_connected = false;
         Screen_Bluetooth_ResetLink();

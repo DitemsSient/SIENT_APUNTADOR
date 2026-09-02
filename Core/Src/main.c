@@ -53,12 +53,7 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart1;
 
 /* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -143,7 +138,7 @@ int main(void)
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
 
   /* USER CODE BEGIN RTOS_THREADS */
   Tareas_CrearTareas();
@@ -486,8 +481,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, RGB_R_Pin|RGB_G_Pin|RGB_B_Pin|SELECTOR_MCU_Pin
                           |BLUETOOTH_VSP_Pin|BLUETOOTH_AUTORUN_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : INTERRUPCION_IMU_Pin USB_ID_Pin BLUETOOTH_MCU_Pin GATILLO_Pin */
-  GPIO_InitStruct.Pin = INTERRUPCION_IMU_Pin|USB_ID_Pin|BLUETOOTH_MCU_Pin|GATILLO_Pin;
+  /*Configure GPIO pins : INTERRUPCION_IMU_Pin USB_ID_Pin BLUETOOTH_MCU_Pin */
+  GPIO_InitStruct.Pin = INTERRUPCION_IMU_Pin|USB_ID_Pin|BLUETOOTH_MCU_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -514,6 +509,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : GATILLO_Pin */
+  GPIO_InitStruct.Pin = GATILLO_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GATILLO_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
@@ -532,9 +537,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  /* USB_DEVICE ya se inicializa una sola vez en Inicializacion_Run() (pre-RTOS,
-   * despues del chequeo de bootloader) -- NO reinicializar aqui, rompe el CDC
-   * ya activo y desconecta la terminal en silencio. */
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)

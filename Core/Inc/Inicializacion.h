@@ -44,7 +44,7 @@
 #define INIT_MODOPROGRAMACION_ENABLE 1U
 #define INIT_MULTIPLEXOR_ENABLE      1U
 #define INIT_FLASH_ENABLE            1U
-#define INIT_BUZZER_ENABLE           1U
+#define INIT_BUZZER_ENABLE           0U  /* Apagado: confirmado que interfiere con el laser (TIM2/ARR compartido) -- ver Pendientes.md */
 #define INIT_BLUETOOTH_ENABLE        1U
 #define INIT_IMU_ENABLE              1U
 #define INIT_MAGNETOMETRO_ENABLE     1U

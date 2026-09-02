@@ -288,7 +288,8 @@ void Inicializacion_Run(void) {
 
 #if INIT_MULTIPLEXOR_ENABLE
     Diagnostico.multiplexor = (MUX_Init(&Mux_Laser) == MUX_OK);
-    Log_Print("MUX", "Multiplexor inicializado en canal 0");
+    Diagnostico.multiplexor = (MUX_SelectChannel(&Mux_Laser, MUX_CHANNEL_6) == MUX_OK) && Diagnostico.multiplexor;
+    Log_Print("MUX", "Multiplexor inicializado en canal 6");
     Log_NewLine();
     HAL_Delay(500U);
 #endif

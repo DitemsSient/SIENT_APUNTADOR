@@ -18,6 +18,7 @@
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include "Display_Oled/Display_Bitmaps.h"
+#include "Transmsion_Laser_IR.h"
 #include <stdio.h>
 #include <ctype.h>
 
@@ -225,6 +226,14 @@ void Screen_Exercise_Draw(Menu_Handle_t *h)
 
         ssd1306_setCursor(0, 24);
         ssd1306_print("> Salir", &Font4x6);
+
+        /* Dispara el codigo de calibracion cada 1s mientras se apunta */
+        static uint32_t s_cal_tick = 0U;
+        if ((HAL_GetTick() - s_cal_tick) >= 1000U) {
+            s_cal_tick = HAL_GetTick();
+            Tx_IR_SendCalibration();
+        }
+        h->needs_redraw = true;
         break;
     }
 

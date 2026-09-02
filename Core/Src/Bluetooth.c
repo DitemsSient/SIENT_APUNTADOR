@@ -11,7 +11,6 @@
  */
 
 #include "Bluetooth.h"
-#include "Logger.h"
 #include <string.h>
 
 /* ========================  EXTERNAL HAL HANDLES  ========================== */
@@ -24,11 +23,8 @@ extern UART_HandleTypeDef huart1;
 BtStatus_e Bt_Init(Bt_Handle_t *h)
 {
     if (h == NULL) {
-        Log_Print("BT", "Error: handle NULL en Init");
         return BT_ERR_PARAM;
     }
-
-    Log_Print("BT", "Iniciando modulo Bluetooth BL654...");
 
     h->huart           = BT_UART;
     h->rx_count        = 0U;
@@ -42,7 +38,6 @@ BtStatus_e Bt_Init(Bt_Handle_t *h)
     /* Arm interrupt reception for the first byte */
     HAL_UART_Receive_IT(h->huart, &h->rx_byte, 1U);
 
-    Log_Print("BT", "Bluetooth inicializado correctamente");
     return BT_OK;
 }
 
@@ -143,7 +138,6 @@ BtStatus_e Bt_SendAdvertise(Bt_Handle_t *h)
 {
     if (h == NULL) { return BT_ERR_PARAM; }
 
-    Log_Print("BT", "Iniciando modo advertising ($CON)...");
     static const uint8_t cmd[] = "$CON\r";
     Bt_ResetRx(h);
     return Bt_Transmit(h, cmd, sizeof(cmd) - 1U);

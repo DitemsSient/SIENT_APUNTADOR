@@ -50,7 +50,6 @@
 #include "Menu/Menu_Screens.h"
 #include "Bluetooth.h"
 #include "Inicializacion.h"
-#include "Logger.h"
 #include "LedRGB.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
@@ -128,35 +127,6 @@ static bool bt_parse_exercise_data(const char *payload, ExerciseGameData_t *out)
 #define BT_MAC_TIMEOUT_MS   20000U /**< Espera del $1<MAC>\r tras el $OK\r
                                         (handshake BLE + GATT puede tardar) */
 
-/**
- * @brief  Imprime en hex + texto todo lo que se haya capturado en
- *         raw_debug, sin filtrar (para diagnostico).
- */
-static void bt_log_raw(void)
-{
-    if (Bluetooth.raw_debug_count == 0U) {
-        Log_Print("BT-RAW", "0 bytes capturados");
-        return;
-    }
-
-    char hex[BT_RAW_DEBUG_LEN * 3U + 1U];
-    char txt[BT_RAW_DEBUG_LEN + 1U];
-
-    uint16_t total = Bluetooth.raw_debug_count;
-    uint16_t n     = (total < BT_RAW_DEBUG_LEN) ? total : BT_RAW_DEBUG_LEN;
-    uint16_t start = (total < BT_RAW_DEBUG_LEN) ? 0U : (total % BT_RAW_DEBUG_LEN);
-
-    for (uint16_t i = 0U; i < n; i++) {
-        uint8_t b = Bluetooth.raw_debug[(start + i) % BT_RAW_DEBUG_LEN];
-        snprintf(&hex[i * 3U], 4U, "%02X ", b);
-        txt[i] = ((b >= 32U) && (b < 127U)) ? (char)b : '.';
-    }
-    txt[n] = '\0';
-
-    Log_Printf("BT-RAW", "%u bytes (total visto: %u): %s", n, total, hex);
-    Log_Printf("BT-RAW", "texto: \"%s\"", txt);
-}
-
 /* ========================  DRAW  ========================================= */
 
 void Screen_Bluetooth_Draw(Menu_Handle_t *h)
@@ -223,8 +193,6 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             }
 
             if (Bluetooth.rx_ready) {
-                Log_Printf("BT", "Recibido (BUSCANDO): \"%s\"", (char *)Bluetooth.rx_buffer);
-                bt_log_raw();
                 if (Bluetooth.rx_count == 2U &&
                     Bluetooth.rx_buffer[0] == 'O' && Bluetooth.rx_buffer[1] == 'K') {
                     /* $OK\r -- alguien se conecto. LED se queda fijo en azul
@@ -242,8 +210,6 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                     h->splash_tick = HAL_GetTick();
                 }
             } else if ((HAL_GetTick() - h->splash_tick) >= BT_ADVERTISE_TIMEOUT_MS) {
-                Log_Print("BT", "Timeout (BUSCANDO): no llego nada");
-                bt_log_raw();
                 LedRGB_Off();
                 h->sub_state   = (uint8_t)BT_SPLASH_ERR;
                 h->splash_tick = HAL_GetTick();
@@ -262,8 +228,6 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             /* LED se queda fijo en azul (ya no parpadea) desde que llego el $OK\r */
 
             if (Bluetooth.rx_ready) {
-                Log_Printf("BT", "Recibido (ESPERANDO): \"%s\"", (char *)Bluetooth.rx_buffer);
-                bt_log_raw();
                 if (Bluetooth.rx_count > 0U && Bluetooth.rx_buffer[0] == '*' &&
                     bt_parse_exercise_data((char *)&Bluetooth.rx_buffer[1], &g_exercise_data)) {
                     Inicializacion_PrintExerciseData();
@@ -276,15 +240,12 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                     h->bt_connected = true;
                     h->sub_state    = (uint8_t)BT_SPLASH_OK;
                 } else {
-                    Log_Print("BT", "Datos de ejercicio invalidos");
                     LedRGB_Off();
                     h->sub_state = (uint8_t)BT_SPLASH_ERR;
                 }
                 Bt_ResetRx(&Bluetooth);
                 h->splash_tick = HAL_GetTick();
             } else if ((HAL_GetTick() - h->splash_tick) >= BT_MAC_TIMEOUT_MS) {
-                Log_Print("BT", "Timeout (ESPERANDO MAC): no llego nada");
-                bt_log_raw();
                 LedRGB_Off();
                 h->sub_state   = (uint8_t)BT_SPLASH_ERR;
                 h->splash_tick = HAL_GetTick();

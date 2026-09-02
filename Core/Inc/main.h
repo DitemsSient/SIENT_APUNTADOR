@@ -89,6 +89,7 @@ void Error_Handler(void);
 #define SELECTOR_MCU_GPIO_Port GPIOB
 #define GATILLO_Pin GPIO_PIN_8
 #define GATILLO_GPIO_Port GPIOA
+#define GATILLO_EXTI_IRQn EXTI9_5_IRQn
 #define MCU_TX_Pin GPIO_PIN_9
 #define MCU_TX_GPIO_Port GPIOA
 #define MCU_RX_Pin GPIO_PIN_10

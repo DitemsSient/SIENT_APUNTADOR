@@ -8,6 +8,7 @@
  */
 
 #include "Transmsion_Laser_IR.h"
+#include "main.h"
 
 /* ======================  STATIC FUNCTIONS  ================================ */
 
@@ -163,14 +164,13 @@ HAL_StatusTypeDef Tx_IR_SendFrame(const uint8_t *pData, uint8_t len) {
 }
 
 /**
- * @brief  Transmits LASER_CAL_CODE (0xABCD) as two bytes, no CRC.
- * @note   Frame structure: SYNC → 0xAB (INTER) → 0xCD (INTER) → SYNC.
+ * @brief  Transmits LASER_CAL_CODE (0xAA55) as two bytes, no CRC.
+ * @note   Frame structure: SYNC → 0xAA (INTER) → 0x55 (INTER) → SYNC.
  *         Used during calibration mode to aim the laser without exposing the MAC.
  */
 void Tx_IR_SendCalibration(void) {
-    uint8_t b0 = (uint8_t)((LASER_CAL_CODE >> 16U) & 0xFFU);  /* 0xAB */
-    uint8_t b1 = (uint8_t)((LASER_CAL_CODE >>  8U) & 0xFFU);  /* 0xCD */
-    uint8_t b2 = (uint8_t)(LASER_CAL_CODE & 0xFFU);            /* 0xEF */
+    uint8_t b0 = (uint8_t)((LASER_CAL_CODE >> 8U) & 0xFFU);  /* 0xAA */
+    uint8_t b1 = (uint8_t)(LASER_CAL_CODE & 0xFFU);           /* 0x55 */
 
     /* ARR is shared with the buzzer on TIM2 — re-enforce the carrier period
      * in case a melody played since the last transmission. */
@@ -179,8 +179,40 @@ void Tx_IR_SendCalibration(void) {
     Tx_IR_SendSymbol(Tx_IR_SYNC_US);
     Tx_IR_SendByte(b0);
     Tx_IR_SendByte(b1);
-    Tx_IR_SendByte(b2);
     Tx_IR_SendSymbol(Tx_IR_SYNC_US);
 
     Tx_IR_Pin_SetLow();
 }
+
+volatile bool gatillo_disparo_pendiente_log = false;
+
+/* Contadores de diagnostico temporal -- para ver si la ISR entra y si el
+ * antirrebote esta descartando disparos legitimos. Se imprimen junto al log. */
+volatile uint32_t gatillo_isr_entradas = 0U;
+volatile uint32_t gatillo_disparos_enviados = 0U;
+
+/* ---------------------------------------------------------------------------
+ * Gatillo por EXTI (PA8) -- COMENTADO temporalmente. Se retoma cuando se
+ * resuelva el tema de fiabilidad del boton (ver Pendientes.md). De momento
+ * el disparo de calibracion se manda periodico cada 3s desde MenuTask
+ * (Tareas_Interrupciones.c).
+ * ---------------------------------------------------------------------------
+ *
+ * void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+ *     static volatile uint32_t s_last_tick = 0U;
+ *
+ *     if (GPIO_Pin == GATILLO_Pin) {
+ *         gatillo_isr_entradas++;
+ *
+ *         uint32_t now = HAL_GetTick();
+ *         if ((now - s_last_tick) < GATILLO_DEBOUNCE_MS) {
+ *             return;
+ *         }
+ *         s_last_tick = now;
+ *
+ *         Tx_IR_SendCalibration();
+ *         gatillo_disparos_enviados++;
+ *         gatillo_disparo_pendiente_log = true;
+ *     }
+ * }
+ */
