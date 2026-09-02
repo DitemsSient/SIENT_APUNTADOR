@@ -30,12 +30,14 @@ BtStatus_e Bt_Init(Bt_Handle_t *h)
 
     Log_Print("BT", "Iniciando modulo Bluetooth BL654...");
 
-    h->huart    = BT_UART;
-    h->rx_count = 0U;
-    h->rx_byte  = 0U;
-    h->rx_ready = false;
+    h->huart           = BT_UART;
+    h->rx_count        = 0U;
+    h->rx_byte         = 0U;
+    h->rx_ready        = false;
+    h->raw_debug_count = 0U;
     memset(h->tx_buffer, 0, BT_TX_BUFFER_SIZE);
     memset(h->rx_buffer, 0, BT_RX_BUFFER_SIZE);
+    memset(h->raw_debug, 0, BT_RAW_DEBUG_LEN);
 
     /* Arm interrupt reception for the first byte */
     HAL_UART_Receive_IT(h->huart, &h->rx_byte, 1U);
@@ -78,6 +80,13 @@ void Bt_StoreByte(Bt_Handle_t *h)
         return;
     }
 
+    /* Captura cruda para diagnostico -- ring buffer, solo memoria, nada de
+     * Logger/USB aqui (esto corre en ISR). Guarda los ultimos N bytes,
+     * asi siempre se ve la cola mas reciente aunque haya mucho texto de
+     * debug del modulo antes del frame real. */
+    h->raw_debug[h->raw_debug_count % BT_RAW_DEBUG_LEN] = h->rx_byte;
+    h->raw_debug_count++;
+
     if (h->rx_byte == '$') {
         h->rx_count = 0U;
         h->rx_ready = false;
@@ -105,6 +114,15 @@ void Bt_ResetRx(Bt_Handle_t *h)
     h->rx_count = 0U;
     h->rx_ready = false;
     memset(h->rx_buffer, 0, BT_RX_BUFFER_SIZE);
+}
+
+void Bt_ResetRawDebug(Bt_Handle_t *h)
+{
+    if (h == NULL) {
+        return;
+    }
+
+    h->raw_debug_count = 0U;
 }
 
 /**
@@ -137,19 +155,23 @@ uint8_t Bt_Test(void)
 {
     extern Bt_Handle_t Bluetooth;
 
-    static const uint8_t cmd[]  = "$AT\r";
-    static       uint8_t resp[16];
+    static const uint8_t cmd[] = BT_CMD_TEST;
 
     Bt_Init(&Bluetooth);
+    Bt_ResetRx(&Bluetooth);
 
     if (Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U) != BT_OK) { return 0U; }
 
-    memset(resp, 0, sizeof(resp));
-    HAL_UART_Receive(Bluetooth.huart, resp, sizeof(resp) - 1U, BT_RX_TIMEOUT_MS);
-
-    /* Busca "OK" en la respuesta */
-    for (uint8_t i = 0U; i < (uint8_t)(sizeof(resp) - 1U); i++) {
-        if (resp[i] == 'O' && resp[i + 1U] == 'K') { return 1U; }
+    /* La recepcion es por IT (armada en Bt_Init) -- esperar rx_ready en vez
+     * de HAL_UART_Receive() bloqueante, que chocaria con la IT ya armada. */
+    uint32_t start = HAL_GetTick();
+    while ((HAL_GetTick() - start) < BT_RX_TIMEOUT_MS) {
+        if (Bluetooth.rx_ready) {
+            uint8_t ok = (strstr((char *)Bluetooth.rx_buffer, "00") != NULL) ? 1U : 0U;
+            Bt_ResetRx(&Bluetooth);
+            return ok;
+        }
+        HAL_Delay(5U);
     }
 
     return 0U;

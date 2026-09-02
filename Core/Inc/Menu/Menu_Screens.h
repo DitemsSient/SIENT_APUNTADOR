@@ -34,12 +34,12 @@ void Screen_TestHW_OnButton(Menu_Handle_t *h, MenuButton_e btn);
 
 /** @brief Sub-states for the Bluetooth screen. */
 typedef enum {
-    BT_MAIN          = 0,   /**< Anunciar / Salir  (or Id + Salir)      */
-    BT_INICIANDO     = 1,   /**< Sends $CON\r                           */
-    BT_BUSCANDO      = 2,   /**< Waits for $OK\r (30 s timeout)         */
-    BT_ESPERANDO     = 3,   /**< Waits for $1<ID>\r or $0\r             */
-    BT_SPLASH_OK     = 4,   /**< "Conectado" (3 s) → MAIN              */
-    BT_SPLASH_ERR    = 5    /**< "Falla de conexion" (3 s) → MAIN      */
+    BT_MAIN          = 0,   /**< Anunciar / Salir  (o Id + Salir)         */
+    BT_INICIANDO     = 1,   /**< Sends $CON\r                             */
+    BT_BUSCANDO      = 2,   /**< Espera $OK\r (conectado) o $NoCON\r (timeout), LED azul parpadea 1s */
+    BT_ESPERANDO     = 3,   /**< Espera $1<MAC>\r tras el $OK\r           */
+    BT_SPLASH_OK     = 4,   /**< "Conectado" (3 s) → MAIN                */
+    BT_SPLASH_ERR    = 5    /**< "Falla de conexion" (3 s) → MAIN        */
 } BtSubState_e;
 
 void Screen_Bluetooth_Draw(Menu_Handle_t *h);

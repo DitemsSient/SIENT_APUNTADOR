@@ -40,10 +40,23 @@ extern "C" {
 
 #define BT_TX_BUFFER_SIZE       256U    /**< Max transmit payload bytes      */
 #define BT_RX_BUFFER_SIZE       256U    /**< Max receive payload bytes       */
+#define BT_RAW_DEBUG_LEN        32U     /**< Bytes crudos capturados para diagnostico */
 
 /* Advertise protocol */
 
-#define BT_ADVERTISE_TIMEOUT_MS 15000U  /**< Timeout waiting for $OK after $CON  */
+#define BT_ADVERTISE_TIMEOUT_MS 21000U  /**< Margen local sobre el timeout de 20s
+                                             del modulo (manda $NoCON si nadie
+                                             se conecta antes de eso)          */
+
+/* Comandos AT del BL654 (app "AT Interface" de Laird/Ezurio, FW 29.5.7.2
+ * confirmado en pruebas). Terminan en '\r' unicamente (sin '\n'), tokens
+ * separados por espacio. Exito = "00" en la respuesta; error = "01<TAB>Exxx". */
+
+#define BT_CMD_TEST         "AT\r"      /**< Test basico -> "00"                    */
+#define BT_CMD_VERSION      "AT I 3\r"  /**< Version FW -> "10\t3\t<version>\r00"   */
+
+/* TODO: AT+DIR -- lista los archivos cargados en el modulo. Pendiente de
+ * probar y documentar el formato de respuesta. */
 
 /* ========================  ENUMERATIONS  ================================== */
 
@@ -69,6 +82,8 @@ typedef struct {
     uint16_t            rx_count;       /**< Bytes accumulated in rx_buffer  */
     uint8_t             rx_byte;        /**< Last byte from UART interrupt   */
     bool                rx_ready;       /**< true when data is available     */
+    uint8_t             raw_debug[BT_RAW_DEBUG_LEN]; /**< Ring buffer: ultimos BT_RAW_DEBUG_LEN bytes crudos */
+    uint16_t            raw_debug_count;              /**< Total acumulado (no capado) -- usar %BT_RAW_DEBUG_LEN */
 } Bt_Handle_t;
 
 /* ================================  API  =================================== */
@@ -108,6 +123,13 @@ void Bt_StoreByte(Bt_Handle_t *h);
  */
 void Bt_ResetRx(Bt_Handle_t *h);
 
+/**
+ * @brief  Limpia el buffer de diagnostico de bytes crudos (raw_debug).
+ * @param  h  Pointer to the Bluetooth handle.
+ * @note   Llamar antes de iniciar una espera para capturar solo lo nuevo.
+ */
+void Bt_ResetRawDebug(Bt_Handle_t *h);
+
 /* ========================  ADVERTISE API  ================================ */
 
 /**
@@ -119,8 +141,8 @@ BtStatus_e Bt_SendAdvertise(Bt_Handle_t *h);
 /* ========================  SELF-TEST  ==================================== */
 
 /**
- * @brief  Sends "AT\r\n" and checks for "OK" in the response within timeout.
- * @return 1 if the module replies with "OK", 0 on timeout or error.
+ * @brief  Sends BT_CMD_TEST ("AT\r") and checks for "00" in the response.
+ * @return 1 if the module replies with "00", 0 on timeout o error.
  */
 uint8_t Bt_Test(void);
 

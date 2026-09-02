@@ -246,12 +246,12 @@ HAL_StatusTypeDef TSL2571_ReadLux(TSL2571_t *dev, uint8_t nSamples,
 
 uint8_t TSL2571_Test(void)
 {
-    extern TSL2571_t tsl;
+    extern TSL2571_t SensorLuz;
 
     TSL2571_RawData_t data = {0};
 
-    if (TSL2571_ReadRawChannels(&tsl, &data) != HAL_OK) { return 0U; }
-    if (data.ch0 == 0U)                                  { return 0U; }
+    if (TSL2571_ReadRawChannels(&SensorLuz, &data) != HAL_OK) { return 0U; }
+    if (data.ch0 == 0U)                                        { return 0U; }
 
     return 1U;
 }

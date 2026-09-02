@@ -150,4 +150,10 @@ void Inicializacion_PrintBanner(void);
  */
 void Inicializacion_PrintDiagnostico(void);
 
+/**
+ * @brief  Imprime por Logger el contenido actual de g_exercise_data.
+ * @note   Llamar tras parsear un frame de datos de juego valido ($*...\r).
+ */
+void Inicializacion_PrintExerciseData(void);
+
 #endif /* INICIALIZACION_H */

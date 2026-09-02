@@ -241,6 +241,19 @@ void Inicializacion_PrintDiagnostico(void) {
     Log_Print("DIAG", "--------------------------------");
 }
 
+void Inicializacion_PrintExerciseData(void) {
+    Log_Print("GAME", "---- Datos de ejercicio ----");
+    Log_Printf("GAME", "Orden: %u", g_exercise_data.orden);
+    Log_Printf("GAME", "Lora: %u", g_exercise_data.lora);
+    Log_Printf("GAME", "Equipo: %s", g_exercise_data.team_name);
+    Log_Printf("GAME", "Alias: %s", g_exercise_data.player_name);
+    Log_Printf("GAME", "Vidas: %u", g_exercise_data.lives);
+    Log_Printf("GAME", "Balas: %u", g_exercise_data.ammo);
+    Log_Printf("GAME", "Tiempo: %lu", (unsigned long)g_exercise_data.tiempo);
+    Log_Printf("GAME", "MAC: %s", g_exercise_data.mac);
+    Log_Print("GAME", "-----------------------------");
+}
+
 void Inicializacion_Run(void) {
 #if INIT_BOOTLOADER_ENABLE
     /* Revisamos si entramos en modo bootloader o normal*/

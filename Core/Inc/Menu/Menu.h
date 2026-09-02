@@ -52,6 +52,7 @@
 
 #define EX_TEAM_NAME_MAXLEN     9U      /**< Max chars for team name (excl. NUL)   */
 #define EX_PLAYER_NAME_MAXLEN   6U      /**< Max chars for player name (excl. NUL) */
+#define EX_MAC_MAXLEN           6U      /**< Ultimos 6 digitos hex de la MAC BLE   */
 
 /* ========================  PROGRAMMING LOCK  ============================= */
 
@@ -113,14 +114,19 @@ typedef struct {
 
 /**
  * @brief  Game-session data for the Exercise screen.
- * @note   Populated externally (future: filled from an RTOS data queue).
- *         Defined in main.c, referenced as extern from Menu_Exercise.c.
+ * @note   Se llena al recibir el frame de datos de juego por Bluetooth,
+ *         tras conectar con Sensores (ver Menu_Bluetooth.c). Definida en
+ *         Inicializacion.c, referenciada como extern desde donde se use.
  */
 typedef struct {
-    uint8_t lives;                                /**< Remaining lives             */
-    uint8_t ammo;                                 /**< Remaining ammo               */
-    char    team_name[EX_TEAM_NAME_MAXLEN + 1U];  /**< Team name, NUL-terminated    */
-    char    player_name[EX_PLAYER_NAME_MAXLEN + 1U]; /**< Player name, NUL-terminated */
+    uint8_t  orden;                                /**< Numero de orden del jugador   */
+    uint8_t  lora;                                 /**< Identificador/canal LoRa      */
+    char     team_name[EX_TEAM_NAME_MAXLEN + 1U];  /**< Equipo, NUL-terminated        */
+    char     player_name[EX_PLAYER_NAME_MAXLEN + 1U]; /**< Alias, NUL-terminated      */
+    uint8_t  lives;                                /**< Vidas restantes               */
+    uint16_t ammo;                                 /**< Balas restantes                */
+    uint32_t tiempo;                               /**< Tiempo de partida (s)          */
+    char     mac[EX_MAC_MAXLEN + 1U];              /**< Ultimos 6 digitos MAC BLE      */
 } ExerciseGameData_t;
 
 extern ExerciseGameData_t g_exercise_data;

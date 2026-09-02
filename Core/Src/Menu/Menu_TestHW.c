@@ -39,6 +39,7 @@
 #include "HWTest_Status.h"
 #include "LSM6DSO32TR.h"
 #include "MMC5983MA.h"
+#include "BatteryMonitor.h"
 #include "stm32l4xx_hal.h"
 #include <stdio.h>
 #include <string.h>
@@ -342,13 +343,12 @@ static void run_sensors_only(void)
     sensor_pass_count = 0U;
     uint8_t ok;
 
-    /* Resultados reales, tomados del diagnostico de Inicializacion_Run()
-     * (arranque del sistema) en vez de valores fijos. */
+    /* Cada prueba corre de verdad en este momento -- no lee el diagnostico
+     * congelado del arranque (Diagnostico solo se usa en Inicializacion_Run()). */
 
     /* --- Flash MX25L6445E --- */
     show_step(sensor_tests[0].name, "...");
-    HAL_Delay(1000U);
-    ok = Diagnostico.flash ? 1U : 0U;
+    ok = Flash_Test();
     sensor_tests[0].passed = ok;
     hw_status.mira.flash = (ok == 1U);
     if (ok) { sensor_pass_count++; }
@@ -357,8 +357,7 @@ static void run_sensors_only(void)
 
     /* --- Sensor de luz ambiental --- */
     show_step(sensor_tests[1].name, "...");
-    HAL_Delay(1000U);
-    ok = Diagnostico.sensorluz ? 1U : 0U;
+    ok = TSL2571_Test();
     sensor_tests[1].passed = ok;
     hw_status.mira.luz_ambiental = (ok == 1U);
     if (ok) { sensor_pass_count++; }
@@ -367,8 +366,7 @@ static void run_sensors_only(void)
 
     /* --- Bluetooth BL654 --- */
     show_step(sensor_tests[2].name, "...");
-    HAL_Delay(1000U);
-    ok = Diagnostico.bluetooth ? 1U : 0U;
+    ok = Bt_Test();
     sensor_tests[2].passed = ok;
     hw_status.mira.bluetooth = (ok == 1U);
     if (ok) { sensor_pass_count++; }
@@ -377,8 +375,7 @@ static void run_sensors_only(void)
 
     /* --- Magnetometro MMC5983MA --- */
     show_step(sensor_tests[3].name, "...");
-    HAL_Delay(1000U);
-    ok = Diagnostico.magnetometro ? 1U : 0U;
+    ok = MMC5983MA_Test();
     sensor_tests[3].passed = ok;
     hw_status.mira.magnetometro = (ok == 1U);
     if (ok) { sensor_pass_count++; }
@@ -387,18 +384,17 @@ static void run_sensors_only(void)
 
     /* --- Giroscopio LSM6DSO32TR (accel + gyro) --- */
     show_step(sensor_tests[4].name, "...");
-    HAL_Delay(1000U);
-    ok = Diagnostico.imu ? 1U : 0U;
+    ok = LSM6DSO32TR_Test(&Imu);
     sensor_tests[4].passed = ok;
     hw_status.mira.giroscopio = (ok == 1U);
     if (ok) { sensor_pass_count++; }
     show_step(sensor_tests[4].name, ok ? "Correct" : "Fail");
     HAL_Delay(1000U);
 
-    /* --- BatteryMonitor BQ27441 --- */
+    /* --- BatteryMonitor BQ27441 (sin self-test dedicado, se lee en vivo) --- */
     show_step(sensor_tests[5].name, "...");
-    HAL_Delay(1000U);
-    ok = Diagnostico.batterymonitor ? 1U : 0U;
+    BatGauge_Update(&Bateria);
+    ok = Bateria.is_ready ? 1U : 0U;
     sensor_tests[5].passed = ok;
     hw_status.mira.batterymonitor = (ok == 1U);
     if (ok) { sensor_pass_count++; }

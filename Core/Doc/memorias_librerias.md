@@ -193,7 +193,13 @@ Buffers TX/RX: 256 bytes. Handle: `Bt_Handle_t { huart, tx_buf, rx_buf, rx_count
 - `Bt_Receive(h, data, len)` — bloqueante
 - `Bt_StoreByte(h)` — llamar desde ISR UART
 - `Bt_ResetRx(h)` — limpia buffer de recepción
-- `Bt_Test()` → `uint8_t` — envía `AT\r\n`, busca "OK" en respuesta con timeout (TestHW)
+- `Bt_Test()` → `uint8_t` — envía `BT_CMD_TEST` (`"AT\r"`), busca `"00"` en respuesta con timeout (TestHW)
+
+> **Módulo real confirmado (28-ago-2026): BL654 con la app "AT Interface" de Laird/Ezurio, firmware `29.5.7.2`.**
+> Sintaxis real distinta a AT clásico: comandos terminan solo en `\r` (sin `\n`), tokens separados por **espacio** (`AT I 3\r`, no `ATI3\r`). Respuesta de éxito es `"00"` (no `"OK"`); error es `"01\t<código>"` (ej. `01\tE007` = comando no reconocido — confirmado enviando sintaxis inválida). Comandos verificados en hardware:
+> - `BT_CMD_TEST` = `"AT\r"` → `"00"`
+> - `BT_CMD_VERSION` = `"AT I 3\r"` → `"10\t3\t29.5.7.2\r00"`
+> - Pendiente de probar/documentar: `AT+DIR` (lista archivos cargados en el módulo).
 
 ---
 
