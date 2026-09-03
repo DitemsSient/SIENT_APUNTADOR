@@ -10,7 +10,6 @@
 #include "Menu/Menu.h"
 #include "Menu/Menu_Screens.h"
 #include "ModoProgramacion.h"
-#include "Bluetooth.h"
 #include "Logger.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
@@ -30,8 +29,6 @@ static const char *Menu_ScreenName(MenuScreen_e screen) {
         default:                 return "?";
     }
 }
-
-extern Bt_Handle_t Bluetooth;
 
 /* ========================  CONSTANTS  ==================================== */
 
@@ -174,29 +171,38 @@ void Menu_Poll(Menu_Handle_t *h)
     }
 }
 
+void Menu_HandleDisconnect(Menu_Handle_t *h)
+{
+    h->bt_connected = false;
+    Screen_Bluetooth_ResetLink();
+
+    /* Sin BT conectado no hay datos reales que mostrar -- regresa la
+     * Preview a los valores base (ver Inicializacion.c). */
+    g_exercise_data.lives    = 1U;
+    g_exercise_data.ammo     = 2U;
+    g_exercise_data.lvBatery = 100U;
+    strncpy(g_exercise_data.team_name,   "EQUIPO x", EX_TEAM_NAME_MAXLEN);
+    g_exercise_data.team_name[EX_TEAM_NAME_MAXLEN] = '\0';
+    strncpy(g_exercise_data.player_name, "USER x", EX_PLAYER_NAME_MAXLEN);
+    g_exercise_data.player_name[EX_PLAYER_NAME_MAXLEN] = '\0';
+
+    ssd1306_clearDisplay();
+    ssd1306_setTextSize(1U);
+    ssd1306_setTextColor(WHITE);
+    ssd1306_printCentered("Bluetooth",    6, &Font5x7);
+    ssd1306_printCentered("Desconect.", 18, &Font5x7);
+    ssd1306_display();
+    HAL_Delay(3000U);
+
+    Menu_GoTo(h, SCREEN_MAIN_MENU);
+}
+
 void Menu_Update(Menu_Handle_t *h)
 {
-    /* Check for BT disconnection message ($DSCON\r) from any screen.
-     * >= 5 en vez de == 5: tolera ruido/bytes extra al final del frame. */
-    if (Bluetooth.rx_ready && Bluetooth.rx_count >= 5U &&
-        Bluetooth.rx_buffer[0] == 'D' && Bluetooth.rx_buffer[1] == 'S' &&
-        Bluetooth.rx_buffer[2] == 'C' && Bluetooth.rx_buffer[3] == 'O' &&
-        Bluetooth.rx_buffer[4] == 'N') {
-        Bt_ResetRx(&Bluetooth);
-        h->bt_connected = false;
-        Screen_Bluetooth_ResetLink();
-
-        ssd1306_clearDisplay();
-        ssd1306_setTextSize(1U);
-        ssd1306_setTextColor(WHITE);
-        ssd1306_printCentered("Bluetooth",    6, &Font5x7);
-        ssd1306_printCentered("Desconect.", 18, &Font5x7);
-        ssd1306_display();
-        HAL_Delay(3000U);
-
-        Menu_GoTo(h, SCREEN_MAIN_MENU);
-        return;
-    }
+    /* $DSCON ya no se revisa aqui -- BluetoothTask (Tareas_Interrupciones.c)
+     * lo vigila de forma global, incluso mientras esta tarea esta suspendida
+     * durante el modo Ejercicio, y llama a Menu_HandleDisconnect() cuando
+     * corresponde. */
 
     /* Process pending button flags */
     MenuButton_e btn = BTN_NONE;

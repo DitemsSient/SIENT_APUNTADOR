@@ -36,7 +36,7 @@ void Screen_TestHW_OnButton(Menu_Handle_t *h, MenuButton_e btn);
 typedef enum {
     BT_MAIN          = 0,   /**< Anunciar / Salir  (o Id + Salir)         */
     BT_INICIANDO     = 1,   /**< Sends $CON\r                             */
-    BT_BUSCANDO      = 2,   /**< Espera $OK\r (conectado) o $NoCON\r (timeout), LED azul parpadea 1s */
+    BT_BUSCANDO      = 2,   /**< Espera $ACKCON\r (conectado) o $NoCON\r (timeout), LED azul parpadea 1s */
     BT_ESPERANDO     = 3,   /**< Espera $1<MAC>\r tras el $OK\r           */
     BT_SPLASH_OK     = 4,   /**< "Conectado" (3 s) → MAIN                */
     BT_SPLASH_ERR    = 5    /**< "Falla de conexion" (3 s) → MAIN        */
@@ -73,5 +73,18 @@ typedef enum {
 void Screen_Exercise_Draw(Menu_Handle_t *h);
 void Screen_Exercise_OnButton(Menu_Handle_t *h, MenuButton_e btn);
 void Screen_Exercise_ResetScroll(void);
+
+/**
+ * @brief  Dibuja la pagina de balas/vidas (misma vista que EX_PREVIEW),
+ *         usada tambien por ExerciseTask (Tareas_Interrupciones.c) para
+ *         alternar pantallas durante un ejercicio activo.
+ */
+void Exercise_DrawStatsPage(void);
+
+/**
+ * @brief  Dibuja la pagina de equipo/jugador (misma vista que EX_PREVIEW),
+ *         usada tambien por ExerciseTask.
+ */
+void Exercise_DrawTeamPage(void);
 
 #endif /* MENU_SCREENS_H */

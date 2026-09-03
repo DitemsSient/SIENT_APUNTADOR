@@ -111,11 +111,16 @@ Menu_Handle_t hmenu;
 HWTest_Status_t hw_status;
 Diagnostico_t Diagnostico;
 
+/* Datos base -- se muestran en la Preview mientras no se haya conectado
+ * el Bluetooth (nada real que mostrar todavia). Se sobreescriben con los
+ * datos reales del ejercicio al parsear un frame $*<csv>\r valido, y se
+ * regresan a estos mismos valores al desconectarse (ver Menu.c, $DSCON). */
 ExerciseGameData_t g_exercise_data = {
-    .lives       = 35U,
-    .ammo        = 10U,
-    .team_name   = "EQUIPO 8",
-    .player_name = "USER 1"
+    .lives       = 1U,
+    .ammo        = 2U,
+    .team_name   = "EQUIPO x",
+    .player_name = "USER x",
+    .lvBatery    = 100U
 };
 
 /* laser_calibration_mode: extern declarada en Transmsion_Laser_IR.h,
@@ -287,9 +292,11 @@ void Inicializacion_Run(void) {
 #endif
 
 #if INIT_MULTIPLEXOR_ENABLE
+    /* Canal inicial de arranque -- LuzMuxTask (Tareas_Interrupciones.c) lo
+     * reajusta cada 5s segun la luz ambiental en cuanto arranca el RTOS. */
     Diagnostico.multiplexor = (MUX_Init(&Mux_Laser) == MUX_OK);
     Diagnostico.multiplexor = (MUX_SelectChannel(&Mux_Laser, MUX_CHANNEL_6) == MUX_OK) && Diagnostico.multiplexor;
-    Log_Print("MUX", "Multiplexor inicializado en canal 6");
+    Log_Print("MUX", "Multiplexor inicializado en canal 6 (valor inicial)");
     Log_NewLine();
     HAL_Delay(500U);
 #endif

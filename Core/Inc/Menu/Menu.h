@@ -127,6 +127,10 @@ typedef struct {
     uint16_t ammo;                                 /**< Balas restantes                */
     uint32_t tiempo;                               /**< Tiempo de partida (s)          */
     char     mac[EX_MAC_MAXLEN + 1U];              /**< Ultimos 6 digitos MAC BLE      */
+    uint8_t  lvBatery;                             /**< Nivel de bateria (%) -- TODO:
+                                                          todavia no se usa para nada,
+                                                          reservado para animar el icono
+                                                          de bateria del HUD              */
 } ExerciseGameData_t;
 
 extern ExerciseGameData_t g_exercise_data;
@@ -146,6 +150,14 @@ void Menu_Init(Menu_Handle_t *h);
  * @note   Call this every iteration of the main while loop.
  */
 void Menu_Update(Menu_Handle_t *h);
+
+/**
+ * @brief  Muestra "Bluetooth Desconect." 3s, regresa g_exercise_data a sus
+ *         valores base, y navega a SCREEN_MAIN_MENU.
+ * @note   Llamada por BluetoothTask (Tareas_Interrupciones.c) al detectar
+ *         $DSCON\r fuera de un ejercicio activo.
+ */
+void Menu_HandleDisconnect(Menu_Handle_t *h);
 
 /**
  * @brief  Polls the GPIO button pins with debounce and sets button flags.

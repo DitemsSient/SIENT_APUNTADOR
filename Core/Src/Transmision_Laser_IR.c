@@ -9,6 +9,8 @@
 
 #include "Transmsion_Laser_IR.h"
 #include "main.h"
+#include "Logger.h"
+#include "Inicializacion.h"
 
 /* ======================  STATIC FUNCTIONS  ================================ */
 
@@ -191,28 +193,39 @@ volatile bool gatillo_disparo_pendiente_log = false;
 volatile uint32_t gatillo_isr_entradas = 0U;
 volatile uint32_t gatillo_disparos_enviados = 0U;
 
-/* ---------------------------------------------------------------------------
- * Gatillo por EXTI (PA8) -- COMENTADO temporalmente. Se retoma cuando se
- * resuelva el tema de fiabilidad del boton (ver Pendientes.md). De momento
- * el disparo de calibracion se manda periodico cada 3s desde MenuTask
- * (Tareas_Interrupciones.c).
- * ---------------------------------------------------------------------------
- *
- * void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
- *     static volatile uint32_t s_last_tick = 0U;
- *
- *     if (GPIO_Pin == GATILLO_Pin) {
- *         gatillo_isr_entradas++;
- *
- *         uint32_t now = HAL_GetTick();
- *         if ((now - s_last_tick) < GATILLO_DEBOUNCE_MS) {
- *             return;
- *         }
- *         s_last_tick = now;
- *
- *         Tx_IR_SendCalibration();
- *         gatillo_disparos_enviados++;
- *         gatillo_disparo_pendiente_log = true;
- *     }
- * }
+/**
+ * @brief  Gatillo (PA8, EXTI8) -- dispara el codigo de calibracion al vuelo.
+ * @note   Corre en ISR de maxima prioridad, bloquea ~15-20ms. No llama
+ *         ninguna funcion de FreeRTOS salvo el Log_Print de aqui abajo,
+ *         que es TEMPORAL solo para verificar que la ISR entra bien en
+ *         cualquier momento (incluso durante Inicializacion_Run()) --
+ *         quitarlo despues, Log_Print usa un mutex y no es ISR-safe.
+ *         Solo dispara si el menu esta en SCREEN_EXERCISE (ejercicio o
+ *         calibrar) -- en Configuracion/Test HW/Bluetooth/Programar el
+ *         boton no debe mandar nada.
  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    static volatile uint32_t s_last_tick = 0U;
+
+    if (GPIO_Pin == GATILLO_Pin) {
+        if (hmenu.screen != SCREEN_EXERCISE) {
+            return;
+        }
+
+        gatillo_isr_entradas++;
+
+        uint32_t now = HAL_GetTick();
+        if ((now - s_last_tick) < GATILLO_DEBOUNCE_MS) {
+            return;
+        }
+        s_last_tick = now;
+
+        Tx_IR_SendCalibration();
+        gatillo_disparos_enviados++;
+
+        /* TEMPORAL -- solo para pruebas, quitar despues (ver nota arriba). */
+        Log_Print("GATILLO", "Trama enviada (0xAA55) -- ISR");
+
+        gatillo_disparo_pendiente_log = true;
+    }
+}

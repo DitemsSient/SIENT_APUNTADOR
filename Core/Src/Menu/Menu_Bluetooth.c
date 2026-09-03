@@ -3,18 +3,20 @@
  * @brief   Bluetooth advertise screen — enters advertising, waits for connection.
  *
  * @details Protocolo real del modulo (firmware BL654 propio, confirmado
- *          28-ago-2026):
+ *          2-sep-2026 -- esquema de ACKs homogeneizado, ver Pendientes.md):
  *          - $CON\r          → arranca advertising (sin ack inmediato)
  *          - $NoCON\r        → pasaron 20s sin conexion, hay que reenviar $CON
- *          - $OK\r           → alguien (Sensores) se conecto
+ *          - $ACKCON\r       → alguien (Sensores) se conecto (antes $OK\r)
  *          - $*<datos>\r     → primer dato GATT tras conectar: datos de
  *                              juego separados por coma (ver bt_parse_
  *                              exercise_data), el '*' marca que hay que
  *                              parsear y guardar en g_exercise_data.
- *                              Responde $ACKOK\r si el parseo fue exitoso.
+ *                              Responde $ACK*DATA\r si el parseo fue exitoso.
  *          - $<dato>\r       → cualquier dato posterior (fuera de este flujo)
  *          - $DSCON\r        → desconexion en cualquier momento (manejado
- *                              de forma global en Menu.c, no aqui)
+ *                              de forma global en BluetoothTask, no aqui)
+ *          - $RUN\r          → arranca el modo Ejercicio (manejado de forma
+ *                              global en BluetoothTask, no aqui)
  *
  *          Formato de $*<datos>\r (separado por comas):
  *          orden,lora,equipo,alias,vidas,balas,tiempo,mac
@@ -32,11 +34,11 @@
  *               │ auto
  *               ▼
  *          BT_BUSCANDO  (LED azul parpadea 1s)
- *            Espera $OK\r (conectado) o $NoCON\r (timeout del modulo)
+ *            Espera $ACKCON\r (conectado) o $NoCON\r (timeout del modulo)
  *          ┌────┴────┐
  *          ▼         ▼
  *     BT_ESPERANDO  BT_SPLASH_ERR
- *     Espera $*<datos>\r, parsea y responde $ACKOK\r
+ *     Espera $*<datos>\r, parsea y responde $ACK*DATA\r
  *          │
  *          ▼
  *     BT_SPLASH_OK
@@ -51,6 +53,7 @@
 #include "Bluetooth.h"
 #include "Inicializacion.h"
 #include "LedRGB.h"
+#include "Logger.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include <stdio.h>
@@ -193,10 +196,11 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             }
 
             if (Bluetooth.rx_ready) {
-                if (Bluetooth.rx_count == 2U &&
-                    Bluetooth.rx_buffer[0] == 'O' && Bluetooth.rx_buffer[1] == 'K') {
-                    /* $OK\r -- alguien se conecto. LED se queda fijo en azul
-                     * mientras esperamos la MAC (ya no parpadea). */
+                if (Bluetooth.rx_count >= 6U &&
+                    strncmp((char *)Bluetooth.rx_buffer, "ACKCON", 6U) == 0) {
+                    /* $ACKCON\r -- alguien se conecto. LED se queda fijo en
+                     * azul mientras esperamos la MAC (ya no parpadea). */
+                    Log_Print("BT", "ACKCON recibido -- conectado");
                     Bt_ResetRx(&Bluetooth);
                     Bt_ResetRawDebug(&Bluetooth);
                     LedRGB_SetColor(RGB_BLUE);
@@ -232,7 +236,7 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                     bt_parse_exercise_data((char *)&Bluetooth.rx_buffer[1], &g_exercise_data)) {
                     Inicializacion_PrintExerciseData();
 
-                    static const uint8_t ack[] = "$ACKOK\r";
+                    static const uint8_t ack[] = "$ACK*DATA\r";
                     Bt_Transmit(&Bluetooth, ack, sizeof(ack) - 1U);
 
                     LedRGB_Off();

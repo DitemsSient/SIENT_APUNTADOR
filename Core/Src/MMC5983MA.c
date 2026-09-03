@@ -8,6 +8,7 @@
  */
 
 #include "MMC5983MA.h"
+#include "I2C1_Bus.h"
 
 /* ======================  EXTERNAL HAL HANDLES  ============================ */
 
@@ -25,12 +26,13 @@ extern I2C_HandleTypeDef hi2c1;
 static MMC_Status_e MMC_WriteReg(uint8_t reg, uint8_t value)
 {
     uint8_t buf[2] = { reg, value };
-    if (HAL_I2C_Master_Transmit(MMC_I2C_HANDLE, MMC_I2C_ADDR,
-                                buf, 2U, MMC_I2C_TIMEOUT) != HAL_OK)
-    {
-        return MMC_ERR_COM;
-    }
-    return MMC_OK;
+
+    I2C1Bus_Lock();
+    HAL_StatusTypeDef st = HAL_I2C_Master_Transmit(MMC_I2C_HANDLE, MMC_I2C_ADDR,
+                                                    buf, 2U, MMC_I2C_TIMEOUT);
+    I2C1Bus_Unlock();
+
+    return (st != HAL_OK) ? MMC_ERR_COM : MMC_OK;
 }
 
 /**
@@ -41,17 +43,16 @@ static MMC_Status_e MMC_WriteReg(uint8_t reg, uint8_t value)
  */
 static MMC_Status_e MMC_ReadRegs(uint8_t reg, uint8_t *data, uint16_t len)
 {
-    if (HAL_I2C_Master_Transmit(MMC_I2C_HANDLE, MMC_I2C_ADDR,
-                                &reg, 1U, MMC_I2C_TIMEOUT) != HAL_OK)
-    {
-        return MMC_ERR_COM;
+    I2C1Bus_Lock();
+    HAL_StatusTypeDef st = HAL_I2C_Master_Transmit(MMC_I2C_HANDLE, MMC_I2C_ADDR,
+                                                    &reg, 1U, MMC_I2C_TIMEOUT);
+    if (st == HAL_OK) {
+        st = HAL_I2C_Master_Receive(MMC_I2C_HANDLE, MMC_I2C_ADDR,
+                                    data, len, MMC_I2C_TIMEOUT);
     }
-    if (HAL_I2C_Master_Receive(MMC_I2C_HANDLE, MMC_I2C_ADDR,
-                               data, len, MMC_I2C_TIMEOUT) != HAL_OK)
-    {
-        return MMC_ERR_COM;
-    }
-    return MMC_OK;
+    I2C1Bus_Unlock();
+
+    return (st != HAL_OK) ? MMC_ERR_COM : MMC_OK;
 }
 
 /**

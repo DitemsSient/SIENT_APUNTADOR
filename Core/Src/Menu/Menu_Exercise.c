@@ -19,6 +19,7 @@
 #include "Display_Oled/Display_Fonts.h"
 #include "Display_Oled/Display_Bitmaps.h"
 #include "Transmsion_Laser_IR.h"
+#include "Inicializacion.h"
 #include <stdio.h>
 #include <ctype.h>
 
@@ -48,10 +49,10 @@ void Screen_Exercise_ResetScroll(void) { ex_offset = 0U; }
 #define HUDACT_COL3_X   (HUDACT_COL_W * 2U)
 #define HUDACT_COL3_W   (MENU_SCREEN_W - HUDACT_COL3_X)
 
-static void HUD_DrawBigNumber(int16_t col_x, int16_t col_w, int16_t x_offset, uint8_t value)
+static void HUD_DrawBigNumber(int16_t col_x, int16_t col_w, int16_t x_offset, uint16_t value)
 {
-    char buf[4];
-    snprintf(buf, sizeof(buf), "%u", (value > 99U) ? 99U : value);
+    char buf[5];
+    snprintf(buf, sizeof(buf), "%u", (value > 999U) ? 999U : value);
 
     uint16_t tw = ssd1306_getStringWidth(buf, &Font5x7);
     int16_t  x  = col_x + (col_w - (int16_t)tw) / 2 + x_offset;
@@ -103,6 +104,32 @@ static void HUD_DrawTeamPage(void)
 
     ssd1306_drawLine(team_x, line_top, line_x2, line_top, WHITE);
     ssd1306_drawLine(team_x, line_bot, line_x2, line_bot, WHITE);
+}
+
+/* ========================  PAGINAS COMPARTIDAS CON ExerciseTask  =========== */
+
+void Exercise_DrawStatsPage(void)
+{
+    ssd1306_clearDisplay();
+    ssd1306_setTextSize(1U);
+    ssd1306_setTextColor(WHITE);
+
+    ssd1306_drawBitmap(0, 0, bitmap_Modo_Ejercicio, MENU_SCREEN_W, MENU_SCREEN_H, WHITE);
+    HUD_DrawBigNumber(HUDACT_COL1_X, (int16_t)HUDACT_COL_W, 0, g_exercise_data.ammo);
+    HUD_DrawBigNumber(HUDACT_COL2_X, (int16_t)HUDACT_COL_W, 4, g_exercise_data.lives);
+
+    ssd1306_display();
+}
+
+void Exercise_DrawTeamPage(void)
+{
+    ssd1306_clearDisplay();
+    ssd1306_setTextSize(1U);
+    ssd1306_setTextColor(WHITE);
+
+    HUD_DrawTeamPage();
+
+    ssd1306_display();
 }
 
 /* ========================  BATTERY BAR  ==================================== */
@@ -175,19 +202,14 @@ void Screen_Exercise_Draw(Menu_Handle_t *h)
 
     case EX_PREVIEW: {
         if (h->selected == 0U) {
-            ssd1306_drawBitmap(0, 0, bitmap_Modo_Ejercicio,
-                               MENU_SCREEN_W, MENU_SCREEN_H, WHITE);
+            Inicializacion_PrintExerciseData();
 
-            HUD_DrawBigNumber(HUDACT_COL1_X, (int16_t)HUDACT_COL_W, 0, g_exercise_data.lives);
-            HUD_DrawBigNumber(HUDACT_COL2_X, (int16_t)HUDACT_COL_W, 4, g_exercise_data.ammo);
-            ssd1306_display();
-
+            Exercise_DrawStatsPage();
             HUD_BatDesvanecimiento();
 
             h->selected = 1U;
         } else {
-            HUD_DrawTeamPage();
-            ssd1306_display();
+            Exercise_DrawTeamPage();
             HAL_Delay(EX_TEAMPAGE_MS);
 
             h->sub_state = (uint8_t)EX_NO_BT;
@@ -227,13 +249,9 @@ void Screen_Exercise_Draw(Menu_Handle_t *h)
         ssd1306_setCursor(0, 24);
         ssd1306_print("> Salir", &Font4x6);
 
-        /* Dispara el codigo de calibracion cada 1s mientras se apunta */
-        static uint32_t s_cal_tick = 0U;
-        if ((HAL_GetTick() - s_cal_tick) >= 1000U) {
-            s_cal_tick = HAL_GetTick();
-            Tx_IR_SendCalibration();
-        }
-        h->needs_redraw = true;
+        /* El disparo ya no es automatico -- se manda por el gatillo
+         * (EXTI, ver HAL_GPIO_EXTI_Callback en Transmision_Laser_IR.c),
+         * que solo dispara mientras h->screen == SCREEN_EXERCISE. */
         break;
     }
 
@@ -245,8 +263,8 @@ void Screen_Exercise_Draw(Menu_Handle_t *h)
         break;
 
     case EX_ACTIVE:
-        HUD_DrawBigNumber(HUDACT_COL1_X, (int16_t)HUDACT_COL_W, 0, g_exercise_data.lives);
-        HUD_DrawBigNumber(HUDACT_COL2_X, (int16_t)HUDACT_COL_W, 4, g_exercise_data.ammo);
+        HUD_DrawBigNumber(HUDACT_COL1_X, (int16_t)HUDACT_COL_W, 0, g_exercise_data.ammo);
+        HUD_DrawBigNumber(HUDACT_COL2_X, (int16_t)HUDACT_COL_W, 4, g_exercise_data.lives);
         break;
     }
 

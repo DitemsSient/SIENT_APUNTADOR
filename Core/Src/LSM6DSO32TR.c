@@ -10,6 +10,7 @@
  */
 
 #include "LSM6DSO32TR.h"
+#include "I2C1_Bus.h"
 #include <string.h>
 
 /* ======================  EXTERNAL HAL HANDLES  ============================ */
@@ -28,12 +29,13 @@ extern I2C_HandleTypeDef hi2c1;
 static LSM_Status_e LSM_WriteReg(uint8_t reg, uint8_t value)
 {
     uint8_t buf[2] = { reg, value };
-    if (HAL_I2C_Master_Transmit(LSM_I2C_HANDLE, LSM_I2C_ADDR,
-                                buf, 2U, LSM_I2C_TIMEOUT) != HAL_OK)
-    {
-        return LSM_ERR_COM;
-    }
-    return LSM_OK;
+
+    I2C1Bus_Lock();
+    HAL_StatusTypeDef st = HAL_I2C_Master_Transmit(LSM_I2C_HANDLE, LSM_I2C_ADDR,
+                                                    buf, 2U, LSM_I2C_TIMEOUT);
+    I2C1Bus_Unlock();
+
+    return (st != HAL_OK) ? LSM_ERR_COM : LSM_OK;
 }
 
 /**
@@ -44,17 +46,16 @@ static LSM_Status_e LSM_WriteReg(uint8_t reg, uint8_t value)
  */
 static LSM_Status_e LSM_ReadRegs(uint8_t reg, uint8_t *data, uint16_t len)
 {
-    if (HAL_I2C_Master_Transmit(LSM_I2C_HANDLE, LSM_I2C_ADDR,
-                                &reg, 1U, LSM_I2C_TIMEOUT) != HAL_OK)
-    {
-        return LSM_ERR_COM;
+    I2C1Bus_Lock();
+    HAL_StatusTypeDef st = HAL_I2C_Master_Transmit(LSM_I2C_HANDLE, LSM_I2C_ADDR,
+                                                    &reg, 1U, LSM_I2C_TIMEOUT);
+    if (st == HAL_OK) {
+        st = HAL_I2C_Master_Receive(LSM_I2C_HANDLE, LSM_I2C_ADDR,
+                                    data, len, LSM_I2C_TIMEOUT);
     }
-    if (HAL_I2C_Master_Receive(LSM_I2C_HANDLE, LSM_I2C_ADDR,
-                               data, len, LSM_I2C_TIMEOUT) != HAL_OK)
-    {
-        return LSM_ERR_COM;
-    }
-    return LSM_OK;
+    I2C1Bus_Unlock();
+
+    return (st != HAL_OK) ? LSM_ERR_COM : LSM_OK;
 }
 
 /**

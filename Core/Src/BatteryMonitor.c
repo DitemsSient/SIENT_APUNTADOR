@@ -8,6 +8,7 @@
  */
 
 #include "BatteryMonitor.h"
+#include "I2C1_Bus.h"
 
 /* ======================  EXTERNAL HAL HANDLES  ============================ */
 
@@ -32,8 +33,10 @@ static uint32_t bq_lastFailTick    = 0U;
  */
 static void bq_writeBytes(uint8_t reg, uint8_t *src, uint8_t count)
 {
+    I2C1Bus_Lock();
     HAL_I2C_Mem_Write(BQ27441_I2C, BQ27441_ADDR, reg,
                       I2C_MEMADD_SIZE_8BIT, src, count, BQ27441_TIMEOUT_MS);
+    I2C1Bus_Unlock();
 }
 
 /**
@@ -41,8 +44,10 @@ static void bq_writeBytes(uint8_t reg, uint8_t *src, uint8_t count)
  */
 static void bq_readBytes(uint8_t reg, uint8_t *dst, uint8_t count)
 {
+    I2C1Bus_Lock();
     HAL_I2C_Mem_Read(BQ27441_I2C, BQ27441_ADDR, reg,
                      I2C_MEMADD_SIZE_8BIT, dst, count, BQ27441_TIMEOUT_MS);
+    I2C1Bus_Unlock();
 }
 
 /**

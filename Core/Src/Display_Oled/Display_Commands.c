@@ -13,6 +13,7 @@
 
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
+#include "I2C1_Bus.h"
 #include <stdlib.h>
 
 /* ======================  STATIC VARIABLES  ================================ */
@@ -29,8 +30,10 @@ static uint8_t    rotation    = 0U;
  * @param  len   Number of bytes to send.
  */
 static void ssd1306_data(uint8_t *data, uint16_t len) {
+    I2C1Bus_Lock();
     HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, (SSD1306_I2C_ADDRESS << 1U),
                       0x40U, 1U, data, len, HAL_MAX_DELAY);
+    I2C1Bus_Unlock();
 }
 
 /**
@@ -105,8 +108,10 @@ static void ssd1306_fillCircleHelper(int16_t x0, int16_t y0, int16_t r,
  * @brief  Sends a single command byte to the SSD1306 via I2C (control byte 0x00).
  */
 void ssd1306_command(uint8_t c) {
+    I2C1Bus_Lock();
     HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, (SSD1306_I2C_ADDRESS << 1U),
                       0x00U, 1U, &c, 1U, HAL_MAX_DELAY);
+    I2C1Bus_Unlock();
 }
 
 /**

@@ -8,6 +8,7 @@
  */
 
 #include "SensorLuz_TSL2571.h"
+#include "I2C1_Bus.h"
 
 /* ======================  STATIC FUNCTIONS  ================================ */
 
@@ -108,8 +109,12 @@ HAL_StatusTypeDef TSL2571_WriteReg(TSL2571_t *dev, uint8_t reg, uint8_t val) {
     uint8_t buf[2];
     buf[0] = prv_CmdByte(reg);
     buf[1] = val;
-    return HAL_I2C_Master_Transmit(dev->hi2c, (uint16_t)(dev->addr << 1),
-                                   buf, 2U, dev->timeout_ms);
+
+    I2C1Bus_Lock();
+    HAL_StatusTypeDef st = HAL_I2C_Master_Transmit(dev->hi2c, (uint16_t)(dev->addr << 1),
+                                                    buf, 2U, dev->timeout_ms);
+    I2C1Bus_Unlock();
+    return st;
 }
 
 /**
@@ -119,12 +124,15 @@ HAL_StatusTypeDef TSL2571_ReadReg(TSL2571_t *dev, uint8_t reg, uint8_t *val) {
     uint8_t cmd = prv_CmdByte(reg);
     HAL_StatusTypeDef st;
 
+    I2C1Bus_Lock();
     st = HAL_I2C_Master_Transmit(dev->hi2c, (uint16_t)(dev->addr << 1),
                                   &cmd, 1U, dev->timeout_ms);
-    if (st != HAL_OK) return st;
-
-    return HAL_I2C_Master_Receive(dev->hi2c, (uint16_t)(dev->addr << 1),
-                                  val, 1U, dev->timeout_ms);
+    if (st == HAL_OK) {
+        st = HAL_I2C_Master_Receive(dev->hi2c, (uint16_t)(dev->addr << 1),
+                                    val, 1U, dev->timeout_ms);
+    }
+    I2C1Bus_Unlock();
+    return st;
 }
 
 /**
@@ -196,12 +204,14 @@ HAL_StatusTypeDef TSL2571_ReadRawChannels(TSL2571_t *dev, TSL2571_RawData_t *dat
     uint8_t buf[4];
     HAL_StatusTypeDef st;
 
+    I2C1Bus_Lock();
     st = HAL_I2C_Master_Transmit(dev->hi2c, (uint16_t)(dev->addr << 1),
                                   &cmd, 1U, dev->timeout_ms);
-    if (st != HAL_OK) return st;
-
-    st = HAL_I2C_Master_Receive(dev->hi2c, (uint16_t)(dev->addr << 1),
-                                 buf, 4U, dev->timeout_ms);
+    if (st == HAL_OK) {
+        st = HAL_I2C_Master_Receive(dev->hi2c, (uint16_t)(dev->addr << 1),
+                                     buf, 4U, dev->timeout_ms);
+    }
+    I2C1Bus_Unlock();
     if (st != HAL_OK) return st;
 
     data->ch0 = ((uint16_t)buf[1] << 8) | buf[0];
