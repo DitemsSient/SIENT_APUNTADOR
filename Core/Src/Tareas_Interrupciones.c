@@ -16,6 +16,8 @@
 #include "Inicializacion.h"
 #include "SensorLuz_TSL2571.h"
 #include "Multiplexor_CD4051B.h"
+#include "BatteryMonitor.h"
+#include "Transmsion_Laser_IR.h"
 #include "Bluetooth.h"
 #include "Menu/Menu_Screens.h"
 #include "Secuencias_LED.h"
@@ -23,6 +25,25 @@
 #include "Display_Oled/Display_Fonts.h"
 #include <string.h>
 #include <stdio.h>
+
+/**
+ * @brief  Imprime el log del ultimo disparo del gatillo si quedo pendiente.
+ * @note   La ISR (HAL_GPIO_EXTI_Callback, Transmision_Laser_IR.c) no puede
+ *         llamar Log_Print directamente (usa mutex, no es ISR-safe) -- deja
+ *         la bandera y quien la revisa (MenuTask o ExerciseTask, la que
+ *         este activa) imprime aqui, ya en contexto de tarea seguro.
+ */
+static void gatillo_log_si_pendiente(void) {
+    if (gatillo_disparo_pendiente_log) {
+        gatillo_disparo_pendiente_log = false;
+        if (laser_calibration_mode) {
+            Log_Print("GATILLO", "Calibracion enviada (0xAA55)");
+        } else {
+            Log_Printf("GATILLO", "Disparo enviado (orden=%u lora=%u) -- balas restantes=%u",
+                       g_exercise_data.orden, g_exercise_data.lora, g_exercise_data.ammo);
+        }
+    }
+}
 
 /* ===========================================================================
  *  MenuTask
@@ -54,6 +75,7 @@ static void MenuTask(void *argument) {
     for (;;) {
         Menu_Poll(&hmenu);
         Menu_Update(&hmenu);
+        gatillo_log_si_pendiente();
         osDelay(MENU_TASK_PERIOD_MS);
     }
 }
@@ -121,8 +143,10 @@ static uint8_t LuzMux_SeleccionarIndice(bool ch0_sat, bool ch1_sat, float lux) {
 }
 
 /**
- * @brief  Lee el TSL2571, elige el canal del Mux y lo reporta, cada
- *         LUZ_MUX_TASK_PERIOD_MS. Bloqueante con osDelay, sin prisa.
+ * @brief  Lee el TSL2571, elige el canal del Mux, lee el nivel de bateria y
+ *         actualiza g_exercise_data.lvBatery -- todo cada LUZ_MUX_TASK_PERIOD_MS.
+ *         Bloqueante con osDelay, sin prisa. Se aprovecha este ciclo para la
+ *         bateria y asi no crear una tarea aparte solo para eso.
  */
 static void LuzMuxTask(void *argument) {
     (void)argument;
@@ -147,6 +171,15 @@ static void LuzMuxTask(void *argument) {
             Log_Print("MUXLUZ", "Error leyendo TSL2571");
         }
 
+        /* Bateria: sin modulo conectado (banco de pruebas) is_ready sale en
+         * 0 y se deja g_exercise_data.lvBatery como estaba (100 por defecto,
+         * ver Inicializacion.c) en vez de pisarlo con basura. */
+        BatGauge_Update(&Bateria);
+        if (Bateria.is_ready) {
+            g_exercise_data.lvBatery = (uint8_t)Bateria.soc_pct;
+            Log_Printf("MUXLUZ", "Bateria=%u%%", (unsigned)Bateria.soc_pct);
+        }
+
         osDelay(LUZ_MUX_TASK_PERIOD_MS);
     }
 }
@@ -159,7 +192,8 @@ static void LuzMuxTask(void *argument) {
  */
 
 #define EXERCISE_TASK_LOOP_MS       150U
-#define EXERCISE_PANTALLA_MS        7000U
+#define EXERCISE_PANTALLA_MS        5000U
+#define EXERCISE_REFRESH_STATS_MS   1000U
 
 /* NOTA: g_exercise_data.tiempo se trata como SEGUNDOS mientras se prueba
  * en banco -- en el proyecto real es en MINUTOS. Cuando se confirme,
@@ -173,6 +207,10 @@ static const osThreadAttr_t s_exerciseTask_attr = {
     .stack_size = 512U * 4U,
     .priority   = (osPriority_t)osPriorityNormal,
 };
+
+/* Declarada aqui (definida mas abajo, junto a ApuntadorUpdateTask) para que
+ * Tareas_IniciarEjercicio() la pueda reanudar. */
+static osThreadId_t s_apuntadorUpdateTaskHandle;
 
 /* true mientras ExerciseTask esta corriendo un ejercicio; BluetoothTask lo
  * consulta para saber como reaccionar a un $DSCON. */
@@ -192,6 +230,7 @@ static void ExerciseTask(void *argument) {
         /* ---- Cuenta regresiva 10..1 ---- */
         bool abortado = false;
         for (uint8_t n = 10U; n >= 1U; n--) {
+            gatillo_log_si_pendiente();
             if (s_dscon_en_ejercicio) { abortado = true; break; }
 
             char buf[5];
@@ -214,6 +253,10 @@ static void ExerciseTask(void *argument) {
             ssd1306_display();
             HAL_Delay(1000U);
 
+            /* Recien aqui se puede disparar de verdad -- antes de esto el
+             * gatillo esta bloqueado (ver HAL_GPIO_EXTI_Callback). */
+            ejercicio_disparo_habilitado = true;
+
             /* ---- Ciclo principal: alterna pantallas cada 10s, revisa
              * tiempo total y DSCON en cada vuelta corta del loop. ---- */
             Log_Print("EJERCICIO", "Cuenta regresiva terminada, arrancando");
@@ -221,12 +264,15 @@ static void ExerciseTask(void *argument) {
             uint32_t duracion_ms = g_exercise_data.tiempo * EXERCISE_TIEMPO_MULTIPLICADOR_MS;
             uint32_t tick_inicio_ejercicio = HAL_GetTick();
             uint32_t tick_inicio_pantalla  = HAL_GetTick();
+            uint32_t tick_refresh_stats    = HAL_GetTick();
             bool     pantalla_stats        = true;
 
             Exercise_DrawStatsPage();
 
             for (;;) {
                 osDelay(EXERCISE_TASK_LOOP_MS);
+
+                gatillo_log_si_pendiente();
 
                 if (s_dscon_en_ejercicio) { abortado = true; break; }
 
@@ -237,13 +283,27 @@ static void ExerciseTask(void *argument) {
                 if ((HAL_GetTick() - tick_inicio_pantalla) >= EXERCISE_PANTALLA_MS) {
                     tick_inicio_pantalla = HAL_GetTick();
                     pantalla_stats = !pantalla_stats;
-                    if (pantalla_stats) { Exercise_DrawStatsPage(); }
-                    else                { Exercise_DrawTeamPage(); }
+                    if (pantalla_stats) {
+                        Exercise_DrawStatsPage();
+                        tick_refresh_stats = HAL_GetTick();
+                    } else {
+                        Exercise_DrawTeamPage();
+                    }
+                } else if (pantalla_stats &&
+                           (HAL_GetTick() - tick_refresh_stats) >= EXERCISE_REFRESH_STATS_MS) {
+                    /* Refresca balas/vidas/bateria cada 1s mientras esta
+                     * visible -- las balas cambian con cada disparo del
+                     * gatillo (ISR), y la pantalla de equipo/jugador no lo
+                     * necesita porque esos datos nunca cambian en vivo. */
+                    tick_refresh_stats = HAL_GetTick();
+                    Exercise_DrawStatsPage();
                 }
             }
         }
 
         /* ---- Fin del ejercicio ---- */
+        ejercicio_disparo_habilitado = false;
+
         if (abortado) {
             Log_Print("EJERCICIO", "Terminado -- $DSCON recibido");
 
@@ -294,16 +354,24 @@ static void ExerciseTask(void *argument) {
  *         un ejercicio activo.
  */
 static void Tareas_IniciarEjercicio(void) {
-    s_ejercicio_activo   = true;
-    s_dscon_en_ejercicio = false;
+    s_ejercicio_activo          = true;
+    s_dscon_en_ejercicio        = false;
+    ejercicio_disparo_habilitado = false;  /* se prende al terminar la cuenta */
 
     /* El gatillo (HAL_GPIO_EXTI_Callback, Transmision_Laser_IR.c) solo
      * dispara si hmenu.screen == SCREEN_EXERCISE -- forzarlo aqui, ya que
      * ExerciseTask toma control de la pantalla sin pasar por Menu_GoTo(). */
     hmenu.screen = SCREEN_EXERCISE;
 
+    /* Por si el $RUN llega justo mientras estabamos parados en Calibrar
+     * (MenuTask se suspende ahi mismo, sin pasar por el OnButton que
+     * normalmente lo apaga) -- sin esto, el gatillo seguiria mandando
+     * calibracion sin descontar balas durante todo el ejercicio real. */
+    laser_calibration_mode = false;
+
     osThreadSuspend(s_menuTaskHandle);
     osThreadResume(s_exerciseTaskHandle);
+    osThreadResume(s_apuntadorUpdateTaskHandle);
 }
 
 /* ===========================================================================
@@ -373,6 +441,71 @@ static void BluetoothTask(void *argument) {
     }
 }
 
+/* ===========================================================================
+ *  ApuntadorUpdateTask -- manda a la otra tarjeta (Sensores) los datos que
+ *  cambian de este lado: balas y % de bateria. Cada APUNTADOR_UPDATE_PERIOD_MS
+ *  compara contra el ultimo valor mandado; si las balas cambiaron o la
+ *  bateria se movio APUNTADOR_BATERIA_UMBRAL_PCT o mas (en cualquier
+ *  direccion), manda $A_AP<balas>,<pct>\r. No espera $ACKA_AP todavia --
+ *  se deja el nombre listo para cuando se implemente reintento (ver
+ *  Pendientes.md). El giroscopio queda fuera por ahora, se agrega despues
+ *  si hace falta.
+ *  Solo corre durante el modo Ejercicio -- nace suspendida, la reanuda
+ *  Tareas_IniciarEjercicio() junto con ExerciseTask, y se auto-suspende en
+ *  cuanto s_ejercicio_activo se apaga (mismo ciclo de vida que ExerciseTask).
+ * ===========================================================================
+ */
+
+#define APUNTADOR_UPDATE_PERIOD_MS      200U
+#define APUNTADOR_BATERIA_UMBRAL_PCT      2U
+
+static const osThreadAttr_t s_apuntadorUpdateTask_attr = {
+    .name       = "ApuntadorUpdateTask",
+    .stack_size = 512U * 4U,
+    .priority   = (osPriority_t)osPriorityNormal,
+};
+
+static void ApuntadorUpdateTask(void *argument) {
+    (void)argument;
+
+    for (;;) {
+        uint16_t ultimo_ammo    = g_exercise_data.ammo;
+        uint8_t  ultima_bateria = g_exercise_data.lvBatery;
+        bool     primera_vuelta = true;
+
+        while (s_ejercicio_activo) {
+            uint16_t ammo_actual    = g_exercise_data.ammo;
+            uint8_t  bateria_actual = g_exercise_data.lvBatery;
+
+            int16_t delta_bateria = (int16_t)bateria_actual - (int16_t)ultima_bateria;
+            bool cambio_balas    = (ammo_actual != ultimo_ammo);
+            bool cambio_bateria  = (delta_bateria >= (int16_t)APUNTADOR_BATERIA_UMBRAL_PCT) ||
+                                   (delta_bateria <= -(int16_t)APUNTADOR_BATERIA_UMBRAL_PCT);
+
+            if (primera_vuelta || cambio_balas || cambio_bateria) {
+                char msg[32];
+                int len = snprintf(msg, sizeof(msg), "$A_AP%u,%u\r",
+                                   (unsigned)ammo_actual, (unsigned)bateria_actual);
+                if (len > 0) {
+                    Bt_Transmit(&Bluetooth, (uint8_t *)msg, (uint16_t)len);
+                    Log_Printf("A_AP", "Enviado -- balas=%u bateria=%u%%",
+                              (unsigned)ammo_actual, (unsigned)bateria_actual);
+                }
+
+                ultimo_ammo    = ammo_actual;
+                ultima_bateria = bateria_actual;
+                primera_vuelta = false;
+            }
+
+            osDelay(APUNTADOR_UPDATE_PERIOD_MS);
+        }
+
+        osThreadSuspend(s_apuntadorUpdateTaskHandle);
+        /* Al reanudar (Tareas_IniciarEjercicio, con el siguiente $RUN), el
+         * for(;;) externo reinicia la comparacion desde cero. */
+    }
+}
+
 /* ================================  API  =================================== */
 
 void Tareas_InicializarMutex(void) {
@@ -392,11 +525,17 @@ void Tareas_CrearTareas(void) {
     s_luzMuxTaskHandle = osThreadNew(LuzMuxTask, NULL, &s_luzMuxTask_attr);
     s_btTaskHandle     = osThreadNew(BluetoothTask, NULL, &s_btTask_attr);
 
-    /* ExerciseTask se crea desde ya (para que el heap libre reportado por
-     * MenuTask ya incluya su stack), pero nace suspendida -- no hace nada
-     * hasta el primer $RUN (Tareas_IniciarEjercicio la reanuda). */
+    /* ExerciseTask y ApuntadorUpdateTask se crean desde ya (para que el
+     * heap libre reportado por MenuTask ya incluya su stack), pero nacen
+     * suspendidas -- no hacen nada hasta el primer $RUN (Tareas_IniciarEjercicio
+     * las reanuda a ambas). Solo deben correr durante el modo Ejercicio. */
     s_exerciseTaskHandle = osThreadNew(ExerciseTask, NULL, &s_exerciseTask_attr);
     if (s_exerciseTaskHandle != NULL) {
         osThreadSuspend(s_exerciseTaskHandle);
+    }
+
+    s_apuntadorUpdateTaskHandle = osThreadNew(ApuntadorUpdateTask, NULL, &s_apuntadorUpdateTask_attr);
+    if (s_apuntadorUpdateTaskHandle != NULL) {
+        osThreadSuspend(s_apuntadorUpdateTaskHandle);
     }
 }

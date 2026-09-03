@@ -305,8 +305,12 @@ static void bq_setTaperRate(uint16_t rate)
  */
 static uint8_t bq_isAlive(void)
 {
-    return (HAL_I2C_IsDeviceReady(BQ27441_I2C, BQ27441_ADDR,
-                                  1U, BQ27441_TIMEOUT_MS) == HAL_OK) ? 1U : 0U;
+    I2C1Bus_Lock();
+    HAL_StatusTypeDef st = HAL_I2C_IsDeviceReady(BQ27441_I2C, BQ27441_ADDR,
+                                                  1U, BQ27441_TIMEOUT_MS);
+    I2C1Bus_Unlock();
+
+    return (st == HAL_OK) ? 1U : 0U;
 }
 
 /**

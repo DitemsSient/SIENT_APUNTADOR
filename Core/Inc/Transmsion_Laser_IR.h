@@ -76,6 +76,11 @@ extern TIM_HandleTypeDef Tx_IR_DELAY_TIM_HANDLE;
 
 extern bool laser_calibration_mode;
 
+/* true solo durante un Ejercicio real (no Calibrar) despues de que termina
+ * la cuenta regresiva -- mientras esta en false, el gatillo no dispara.
+ * La pone ExerciseTask (Tareas_Interrupciones.c). */
+extern volatile bool ejercicio_disparo_habilitado;
+
 /* Bandera puesta en alto por la ISR del gatillo tras enviar el codigo de
  * calibracion; MenuTask la revisa cada ciclo para imprimir el log fuera
  * de la ISR, y la vuelve a bajar. */

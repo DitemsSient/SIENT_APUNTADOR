@@ -194,12 +194,14 @@ volatile uint32_t gatillo_isr_entradas = 0U;
 volatile uint32_t gatillo_disparos_enviados = 0U;
 
 /**
- * @brief  Gatillo (PA8, EXTI8) -- dispara el codigo de calibracion al vuelo.
+ * @brief  Gatillo (PA8, EXTI8) -- dispara al vuelo: codigo de calibracion
+ *         (0xAA55) en modo Calibrar, o el frame real (orden+lora) durante
+ *         un Ejercicio activo, con su descuento de balas.
  * @note   Corre en ISR de maxima prioridad, bloquea ~15-20ms. No llama
- *         ninguna funcion de FreeRTOS salvo el Log_Print de aqui abajo,
- *         que es TEMPORAL solo para verificar que la ISR entra bien en
- *         cualquier momento (incluso durante Inicializacion_Run()) --
- *         quitarlo despues, Log_Print usa un mutex y no es ISR-safe.
+ *         ninguna funcion de FreeRTOS ni nada que use un mutex (Log_Print
+ *         incluido) -- eso se difiere via gatillo_disparo_pendiente_log,
+ *         que MenuTask/ExerciseTask revisan y limpian en su propio ciclo
+ *         (cualquiera de las dos que este activa en ese momento).
  *         Solo dispara si el menu esta en SCREEN_EXERCISE (ejercicio o
  *         calibrar) -- en Configuracion/Test HW/Bluetooth/Programar el
  *         boton no debe mandar nada.
@@ -212,6 +214,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
             return;
         }
 
+        /* En Ejercicio real (no Calibrar) no se puede disparar mientras
+         * corre la cuenta regresiva -- ExerciseTask pone esta bandera en
+         * true justo despues de mostrar "!INICIA!". Calibrar no usa esta
+         * bandera, siempre puede disparar. */
+        if (!laser_calibration_mode && !ejercicio_disparo_habilitado) {
+            return;
+        }
+
         gatillo_isr_entradas++;
 
         uint32_t now = HAL_GetTick();
@@ -220,11 +230,21 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
         }
         s_last_tick = now;
 
-        Tx_IR_SendCalibration();
-        gatillo_disparos_enviados++;
+        if (laser_calibration_mode) {
+            /* Calibrar: solo apuntar, no gasta balas. */
+            Tx_IR_SendCalibration();
+        } else {
+            /* Ejercicio real: frame con orden+lora (p.ej. orden=1,lora=2
+             * -> bytes {0x01,0x02}), y SI descuenta bala (tope en 0). */
+            uint8_t frame[2] = { g_exercise_data.orden, g_exercise_data.lora };
+            Tx_IR_SendFrame(frame, 2U);
 
-        /* TEMPORAL -- solo para pruebas, quitar despues (ver nota arriba). */
-        Log_Print("GATILLO", "Trama enviada (0xAA55) -- ISR");
+            if (g_exercise_data.ammo > 0U) {
+                g_exercise_data.ammo--;
+            }
+        }
+
+        gatillo_disparos_enviados++;
 
         gatillo_disparo_pendiente_log = true;
     }

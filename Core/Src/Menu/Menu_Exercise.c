@@ -4,7 +4,7 @@
  *
  * @details Flow:
  *          - EX_NO_BT: header "Bt Cnet" / "Bt NO Cnet" + Preview / Md Calibrar / Salir
- *          - EX_PREVIEW: one-shot blocking sequence (HUD + team page) → EX_NO_BT
+ *          - EX_PREVIEW: no bloqueante, 2 vueltas balas/vidas (3s) + equipo/jugador (3s) → EX_NO_BT
  *          - EX_CALIBRAR: "Calibra tu / arma" with lines, Salir option → EX_NO_BT
  *          - EX_WAITING: bitmap + "Esperando..." (awaits LoRa)
  *          - EX_ACTIVE: static HUD with lives/ammo
@@ -106,6 +106,67 @@ static void HUD_DrawTeamPage(void)
     ssd1306_drawLine(team_x, line_bot, line_x2, line_bot, WHITE);
 }
 
+/* ========================  BATTERY BAR  ==================================== */
+
+#define BAT_BAR_X   55
+#define BAT_BAR_Y   2
+#define BAT_BAR_W   4
+#define BAT_BAR_H   16
+
+/**
+ * @brief  Cuantos renglones (de BAT_BAR_H) corresponden a un porcentaje 0-100.
+ *         Cada renglon vale 100/BAT_BAR_H % (100/16 = 6.25% c/u), redondeado
+ *         al mas cercano.
+ */
+static uint8_t HUD_BateryFilledRows(uint8_t pct)
+{
+    if (pct > 100U) { pct = 100U; }
+    uint16_t filled = ((uint16_t)pct * BAT_BAR_H + 50U) / 100U;
+    return (filled > BAT_BAR_H) ? (uint8_t)BAT_BAR_H : (uint8_t)filled;
+}
+
+/**
+ * @brief  Dibuja la barra de bateria de un solo golpe (sin animar, sin
+ *         llamar ssd1306_display()), llena desde abajo segun el porcentaje.
+ * @note   Pensada para el refresco periodico de Exercise_DrawStatsPage().
+ *         Al bajar el porcentaje se vacia de abajo hacia arriba (la carga
+ *         restante se queda arriba, no abajo).
+ */
+static void HUD_DrawBateryLevel(uint8_t pct)
+{
+    uint8_t filled = HUD_BateryFilledRows(pct);
+    for (uint8_t row = 0U; row < (uint8_t)BAT_BAR_H; row++) {
+        bool encendido = row < filled;
+        ssd1306_drawLine(BAT_BAR_X, BAT_BAR_Y + (int16_t)row,
+                         BAT_BAR_X + BAT_BAR_W - 1, BAT_BAR_Y + (int16_t)row,
+                         encendido ? WHITE : BLACK);
+    }
+}
+
+/* COMENTADA -- animacion de vaciado/llenado de la pila. Ya no se usa en
+ * EX_PREVIEW (ahora se muestra el valor real via HUD_DrawBateryLevel(),
+ * sin animar), pero se deja aqui por si se vuelve a necesitar despues.
+ *
+ * static void HUD_BatDesvanecimiento(uint8_t pct)
+ * {
+ *     for (int16_t row = BAT_BAR_H - 1; row >= 0; row--) {
+ *         ssd1306_drawLine(BAT_BAR_X, BAT_BAR_Y + row,
+ *                          BAT_BAR_X + BAT_BAR_W - 1, BAT_BAR_Y + row, BLACK);
+ *         ssd1306_display();
+ *         HAL_Delay(180U);
+ *     }
+ *
+ *     uint8_t filled = HUD_BateryFilledRows(pct);
+ *     for (uint8_t i = 0U; i < filled; i++) {
+ *         int16_t row = (int16_t)((uint8_t)BAT_BAR_H - 1U - i);
+ *         ssd1306_drawLine(BAT_BAR_X, BAT_BAR_Y + row,
+ *                          BAT_BAR_X + BAT_BAR_W - 1, BAT_BAR_Y + row, WHITE);
+ *         ssd1306_display();
+ *         HAL_Delay(180U);
+ *     }
+ * }
+ */
+
 /* ========================  PAGINAS COMPARTIDAS CON ExerciseTask  =========== */
 
 void Exercise_DrawStatsPage(void)
@@ -117,6 +178,7 @@ void Exercise_DrawStatsPage(void)
     ssd1306_drawBitmap(0, 0, bitmap_Modo_Ejercicio, MENU_SCREEN_W, MENU_SCREEN_H, WHITE);
     HUD_DrawBigNumber(HUDACT_COL1_X, (int16_t)HUDACT_COL_W, 0, g_exercise_data.ammo);
     HUD_DrawBigNumber(HUDACT_COL2_X, (int16_t)HUDACT_COL_W, 4, g_exercise_data.lives);
+    HUD_DrawBateryLevel(g_exercise_data.lvBatery);
 
     ssd1306_display();
 }
@@ -132,51 +194,23 @@ void Exercise_DrawTeamPage(void)
     ssd1306_display();
 }
 
-/* ========================  BATTERY BAR  ==================================== */
-
-#define BAT_BAR_X   55
-#define BAT_BAR_Y   2
-#define BAT_BAR_W   4
-#define BAT_BAR_H   16
-
-static void HUD_BatParpadeo(void)
-{
-    for (uint8_t i = 0U; i < 5U; i++) {
-        ssd1306_fillRect(BAT_BAR_X, BAT_BAR_Y, BAT_BAR_W, BAT_BAR_H, BLACK);
-        ssd1306_display();
-        HAL_Delay(180U);
-
-        ssd1306_fillRect(BAT_BAR_X, BAT_BAR_Y, BAT_BAR_W, BAT_BAR_H, WHITE);
-        ssd1306_display();
-        HAL_Delay(180U);
-    }
-}
-
-static void HUD_BatDesvanecimiento(void)
-{
-    for (int16_t row = BAT_BAR_H - 1; row >= 0; row--) {
-        ssd1306_drawLine(BAT_BAR_X, BAT_BAR_Y + row,
-                         BAT_BAR_X + BAT_BAR_W - 1, BAT_BAR_Y + row, BLACK);
-        ssd1306_display();
-        HAL_Delay(180U);
-    }
-
-    for (int16_t row = 0; row < BAT_BAR_H; row++) {
-        ssd1306_drawLine(BAT_BAR_X, BAT_BAR_Y + row,
-                         BAT_BAR_X + BAT_BAR_W - 1, BAT_BAR_Y + row, WHITE);
-        ssd1306_display();
-        HAL_Delay(180U);
-    }
-
-    HUD_BatParpadeo();
-}
-
-#define EX_TEAMPAGE_MS   3000U
+#define EX_PREVIEW_STEP_MS   3000U
 
 /* ========================  DRAW  =========================================== */
 
 void Screen_Exercise_Draw(Menu_Handle_t *h)
 {
+    /* EX_PREVIEW no bloqueante: mientras esperamos el timer de cada paso
+     * no hay nada nuevo que dibujar. Sin este guard, el clear+display
+     * incondicionales de abajo (pensados para el resto de los sub-estados,
+     * que si dibujan todo en cada llamada) mandarian un buffer vacio a la
+     * pantalla cada 20ms -- destello negro repetido, confirmado en pruebas. */
+    if ((ExSubState_e)h->sub_state == EX_PREVIEW && h->selected != 0U &&
+        (HAL_GetTick() - h->splash_tick) < EX_PREVIEW_STEP_MS) {
+        h->needs_redraw = true;
+        return;
+    }
+
     ssd1306_clearDisplay();
     ssd1306_setTextSize(1U);
     ssd1306_setTextColor(WHITE);
@@ -201,19 +235,37 @@ void Screen_Exercise_Draw(Menu_Handle_t *h)
     }
 
     case EX_PREVIEW: {
+        /* No bloqueante -- si MenuTask se suspende a medio ciclo (llega un
+         * $RUN mientras estamos aqui), al reanudar cae limpio en el menu
+         * principal (ya lo dejo puesto Menu_GoTo en ExerciseTask) en vez
+         * de terminar una llamada bloqueada colgante de un ciclo viejo.
+         * 2 vueltas de balas/vidas (3s) -> equipo/jugador (3s), y sale. */
         if (h->selected == 0U) {
             Inicializacion_PrintExerciseData();
 
             Exercise_DrawStatsPage();
-            HUD_BatDesvanecimiento();
+            /* Animacion de vaciado/llenado de la pila -- COMENTADA. Ya no
+             * hace falta, Exercise_DrawStatsPage() ya pinta el valor real
+             * (g_exercise_data.lvBatery) via HUD_DrawBateryLevel(). Se deja
+             * aqui por si se vuelve a necesitar mas adelante.
+             * HUD_BatDesvanecimiento(g_exercise_data.lvBatery); */
 
-            h->selected = 1U;
-        } else {
-            Exercise_DrawTeamPage();
-            HAL_Delay(EX_TEAMPAGE_MS);
+            h->splash_tick = HAL_GetTick();
+            h->selected    = 1U;
 
-            h->sub_state = (uint8_t)EX_NO_BT;
-            h->selected  = 0U;
+        } else if ((HAL_GetTick() - h->splash_tick) >= EX_PREVIEW_STEP_MS) {
+            h->splash_tick = HAL_GetTick();
+            h->selected++;
+
+            switch (h->selected) {
+                case 2U: Exercise_DrawTeamPage();  break;  /* vuelta 1: equipo  */
+                case 3U: Exercise_DrawStatsPage(); break;  /* vuelta 2: balas   */
+                case 4U: Exercise_DrawTeamPage();  break;  /* vuelta 2: equipo  */
+                default:
+                    h->sub_state = (uint8_t)EX_NO_BT;
+                    h->selected  = 0U;
+                    break;
+            }
         }
 
         h->needs_redraw = true;

@@ -127,6 +127,9 @@ ExerciseGameData_t g_exercise_data = {
  * definida aqui porque Menu_Exercise.c y Test.c la referencian por nombre. */
 bool laser_calibration_mode = false;
 
+/* ejercicio_disparo_habilitado: idem, la controla ExerciseTask. */
+volatile bool ejercicio_disparo_habilitado = false;
+
 /* ===========================================================================
  *  Sensor de luz (TSL2571)
  * ===========================================================================

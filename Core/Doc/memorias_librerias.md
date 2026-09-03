@@ -133,7 +133,7 @@ Ganancias: `TSL2571_GAIN_1X/8X/16X/120X`.
 - `TSL2571_ReadLux(dev, nSamples, gapMs, &lux, &raw)` — promedio + conversión a lux
 - `TSL2571_ReadRawChannels(dev, &raw)` — lectura directa CH0/CH1
 - `TSL2571_SetGain / SetATime / Enable / Disable / WriteReg / ReadReg`
-- `TSL2571_Test()` → `uint8_t` — I2C ACK + ch0 > 0 (TestHW; usa `extern TSL2571_t tsl`)
+- `TSL2571_Test()` → `uint8_t` — I2C ACK + ch0 > 0 (TestHW; usa `extern TSL2571_t SensorLuz`, el global real de `Inicializacion.c`)
 
 Fórmula integración: `Tint = 2.7296 × (256 − ATIME) ms`.
 
@@ -200,6 +200,19 @@ Buffers TX/RX: 256 bytes. Handle: `Bt_Handle_t { huart, tx_buf, rx_buf, rx_count
 > - `BT_CMD_TEST` = `"AT\r"` → `"00"`
 > - `BT_CMD_VERSION` = `"AT I 3\r"` → `"10\t3\t29.5.7.2\r00"`
 > - Pendiente de probar/documentar: `AT+DIR` (lista archivos cargados en el módulo).
+
+> **Protocolo de juego (firmware propio del BL654, sobre el mismo UART) — confirmado y homogeneizado a `$ACK<nombre>` (2/3-sep-2026):**
+> Además del "AT Interface" de arriba, el módulo corre su propio firmware de aplicación con mensajes `$...\r`:
+> - `$CON\r` → arranca advertising (nosotros lo mandamos, sin ack inmediato) · `$NoCON\r` → timeout 20s sin conexión
+> - `$ACKCON\r` (antes `$OK\r`) → alguien (Sensores) se conectó
+> - `$*<datos>\r` → primer payload GATT tras conectar (CSV `orden,lora,equipo,alias,vidas,balas,tiempo,mac`) → respondemos `$ACK*DATA\r`
+> - `$DSCON\r` → desconexión en cualquier momento → respondemos `$ACKDSCON\r` (vigilado globalmente por `BluetoothTask`, no por la pantalla de Bluetooth)
+> - `$RUN\r` → arranca el modo Ejercicio → respondemos `$ACKRUN\r` (también vigilado por `BluetoothTask`)
+> - `$END\r` → lo mandamos nosotros cuando el Ejercicio termina por tiempo agotado (no si terminó por `$DSCON`, ya no hay a quién avisarle)
+> - `$A_AP<balas>,<pct>\r` → lo mandamos nosotros cada 200ms si cambian las balas o la batería se mueve ≥2% (ver `ApuntadorUpdateTask` abajo)
+> - `$A_SN...\r` → **futuro, NO implementado todavía** — la PCB Sensores nos reportará cambios de vidas por ahí
+>
+> Ninguno de estos ACK espera reintento todavía de nuestro lado (si no llega, no pasa nada por ahora) — ver `Pendientes.md`.
 
 ---
 
@@ -412,3 +425,73 @@ Colores: `BLACK(0)`, `WHITE(1)`, `INVERSE(2)`.
 
 Bitmaps disponibles en `Display_Bitmaps.h`: `bitmap_Logo_SIENT`, `bitmap_Candado_Abierto`,
 `bitmap_Candado_Cerrado`, `bitmap_Modo_Ejercicio`.
+
+---
+
+## Tareas_Interrupciones (RTOS)
+
+Punto central de todas las tareas de FreeRTOS (CMSIS-RTOS v2) del firmware real. No es un
+driver de hardware — orquesta cuándo corre cada cosa y quién tiene el control del OLED/I2C1
+en cada momento. Todas las tareas están en `osPriorityNormal` (sin inversión de prioridad
+posible entre ellas).
+
+**Archivo:** `Tareas_Interrupciones.h` / `Tareas_Interrupciones.c` · **Versión:** 1.0.0
+
+**5 tareas (2-3 sep 2026):**
+
+| Tarea | Periodo | Corre | Qué hace |
+|---|---|---|---|
+| `MenuTask` | 20 ms | Siempre, salvo suspendida durante un Ejercicio | `Menu_Poll()` + `Menu_Update()` (navegación/pantallas), reporta heap libre en su primera vuelta, imprime el log diferido del gatillo |
+| `LuzMuxTask` | 10 s | Siempre | Lee TSL2571, ajusta `Mux_Laser` (potencia del láser) según luz ambiental, lee `BatGauge_Update()` y actualiza `g_exercise_data.lvBatery` |
+| `BluetoothTask` | 20 ms | Siempre | Vigila `$DSCON`/`$RUN` de forma global (incluso con `MenuTask` suspendida), responde sus ACK, arranca/corta el Ejercicio |
+| `ExerciseTask` | — (loop corto 150 ms dentro) | Solo durante un Ejercicio — nace suspendida, la reanuda `Tareas_IniciarEjercicio()` | Cuenta regresiva 10..1, `"!INICIA!"`, alterna pantallas balas/vidas ↔ equipo/jugador cada `EXERCISE_PANTALLA_MS`, refresca balas/vidas/batería cada 1s, controla el temporizador general, manda `$END\r` y corre la secuencia de LED al terminar |
+| `ApuntadorUpdateTask` | 200 ms | Solo durante un Ejercicio — mismo ciclo de vida que `ExerciseTask` | Compara balas/batería contra el último valor mandado, manda `$A_AP<balas>,<pct>\r` si cambiaron |
+
+**Suspender/reanudar en vez de crear/destruir:** `ExerciseTask` y `ApuntadorUpdateTask` se crean una sola vez (`Tareas_CrearTareas()`) y nacen suspendidas — cada `$RUN` las reanuda, cada fin de ejercicio se auto-suspenden. Así se evita la sobrecarga/riesgo de `osThreadNew`/terminar tareas en caliente.
+
+**Banderas compartidas** (todas `static volatile bool`, viven en este archivo):
+- `s_ejercicio_activo` — true mientras `ExerciseTask` corre un ejercicio
+- `s_dscon_en_ejercicio` — la pone `BluetoothTask` si llega `$DSCON` en medio de un ejercicio; `ExerciseTask` la revisa y aborta
+- `ejercicio_disparo_habilitado` (declarada en `Transmsion_Laser_IR.h`, la consulta el gatillo) — false durante la cuenta regresiva, true después de `"!INICIA!"`, false al terminar
+
+**API:**
+- `Tareas_InicializarMutex()` — crea los mutex (`Log_InitMutex()`, `I2C1Bus_InitMutex()`) — llamar tras `osKernelInitialize()`, antes de `osKernelStart()`
+- `Tareas_CrearTareas()` — crea las 5 tareas — llamar antes de `osKernelStart()`
+
+> **REGLA DURA:** nunca llamar `Log_Print`/`Log_Printf` ni `I2C1Bus_Lock()` entre `Tareas_InicializarMutex()` y `osKernelStart()` — el mutex ya existe pero el scheduler no corre, `osMutexAcquire(..., osWaitForever)` se cuelga para siempre en silencio (confirmado, costó una tarde de debug). Cualquier log/I2C en esa ventana hay que diferirlo a la primera vuelta de una tarea (ver `MenuTask`).
+
+---
+
+## I2C1_Bus
+
+Mutex compartido del bus I2C1, mismo patrón que el mutex del `Logger`. Sin esto, dos tareas
+pueden intentar una transacción I2C1 al mismo tiempo (ej. `MenuTask` dibujando en el OLED
+mientras `LuzMuxTask` lee el TSL2571/batería) y el driver HAL de I2C, que no es reentrante,
+deja una de las dos transacciones a medias en silencio — síntoma real observado: pantalla
+"medio pintada" (algunos de los pedazos de 16 bytes que manda `ssd1306_display()` se perdían).
+
+**Archivo:** `I2C1_Bus.h` / `I2C1_Bus.c` · **Versión:** 1.0.0
+
+**Todos los chokepoints reales de I2C1 en el proyecto quedan envueltos:** `Display_Commands.c`
+(`ssd1306_command`/`ssd1306_data`), `SensorLuz_TSL2571.c`, `LSM6DSO32TR.c`, `MMC5983MA.c`,
+`BatteryMonitor.c` (incluye `bq_isAlive()`, que se quedó fuera en la primera pasada y causó
+que el bug siguiera apareciendo — ver `Pendientes.md`).
+
+**API:**
+- `I2C1Bus_InitMutex()` — crea el mutex, llamar junto con `Log_InitMutex()` en `Tareas_InicializarMutex()`
+- `I2C1Bus_Lock()` / `I2C1Bus_Unlock()` — envolver cada transacción I2C1 real (bloqueante, `osWaitForever` — seguro porque cada llamada HAL ya tiene su propio timeout interno, así que el mutex siempre se libera)
+
+---
+
+## Secuencias_LED
+
+Catálogo de secuencias de parpadeo del LED RGB con significado fijo — para no tener que
+adivinar qué parpadeo es cuál, y porque en la práctica no siempre hay Logger a la mano.
+
+**Archivo:** `Secuencias_LED.h` / `Secuencias_LED.c` · **Versión:** 1.0.0
+
+**API:**
+- `SecuenciasLED_FinEjercicio()` — arcoíris (6 colores, 500ms c/u) × 2 vueltas + rojo on/off 1s × 3 (fin normal, tiempo agotado)
+- `SecuenciasLED_FinPorDesconexion()` — rojo parpadeando 800ms × 4 (fin por `$DSCON` en medio del ejercicio)
+
+> El parpadeo verde/rojo × 3 del bootloader (`Bootloader.c`, `Bootloader_BlinkLed()`) NO vive aquí a propósito — es ruta crítica (indica si se entró a modo DFU) y no se quiso tocar ese archivo. Documentado solo como referencia.
