@@ -13,7 +13,7 @@
 #include "SensorLuz_TSL2571.h"
 #include "Display_Oled/Display_Comands.h"
 #include "BatteryMonitor.h"
-#include "LedRGB.h"
+#include "Secuencias_LED.h"
 #include "Buzzer.h"
 
 /* ======================  STATIC VARIABLES  ================================ */
@@ -46,7 +46,7 @@ PM_Status_e PowerManager_SuspendAll(PM_Result_t *result)
     bool all_ok = true;
 
     /* --- Actuators off (no error possible) --- */
-    LedRGB_Off();
+    SecuenciasLED_Apagar();
     Buzzer_Stop();
 
     /* --- ICs with low-power commands --- */

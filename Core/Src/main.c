@@ -538,7 +538,10 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
+  /* MX_USB_DEVICE_Init(); -- NO llamar aqui, ya se hizo en Inicializacion_Run()
+   * (pre-RTOS). Llamarlo de nuevo resetea el stack USB/CDC mientras el host
+   * ya tiene la conexion activa, rompiendo el Logger en silencio. CubeMX
+   * reinserta esta linea sola en cada regeneracion -- volver a comentarla. */
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)

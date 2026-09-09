@@ -7,7 +7,8 @@
  *          transaccion I2C1 al mismo tiempo (ej. MenuTask dibujando en el
  *          OLED mientras LuzMuxTask lee el TSL2571) y una de las dos falla
  *          porque el driver HAL de I2C no es reentrante entre tareas.
- *          Mismo patron que el mutex del Logger (Log_InitMutex()).
+ *          Mismo patron que usaba el Logger antes de migrar a cola
+ *          (7-sep-2026, ver Logger.h) -- este si sigue siendo mutex.
  *
  * @date    September 2, 2026
  * @author  César Pérez
@@ -21,7 +22,7 @@
 
 /**
  * @brief  Crea el mutex compartido del bus I2C1.
- * @note   Llamar una sola vez, junto con Log_InitMutex() en
+ * @note   Llamar una sola vez, junto con Log_InitQueue() en
  *         Tareas_InicializarMutex() (despues de osKernelInitialize(),
  *         antes de osKernelStart() -- crear el mutex ahi es seguro, lo que
  *         NO es seguro es *usarlo* -- I2C1Bus_Lock()/Unlock() -- antes de

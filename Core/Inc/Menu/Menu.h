@@ -52,7 +52,7 @@
 
 #define EX_TEAM_NAME_MAXLEN     9U      /**< Max chars for team name (excl. NUL)   */
 #define EX_PLAYER_NAME_MAXLEN   6U      /**< Max chars for player name (excl. NUL) */
-#define EX_MAC_MAXLEN           6U      /**< Ultimos 6 digitos hex de la MAC BLE   */
+#define EX_MAC_MAXLEN           14U     /**< MAC hex completa (14 digitos), en pantalla solo se muestran los ultimos 8 */
 
 /* ========================  PROGRAMMING LOCK  ============================= */
 
@@ -126,7 +126,7 @@ typedef struct {
     uint8_t  lives;                                /**< Vidas restantes               */
     uint16_t ammo;                                 /**< Balas restantes                */
     uint32_t tiempo;                               /**< Tiempo de partida (s)          */
-    char     mac[EX_MAC_MAXLEN + 1U];              /**< Ultimos 6 digitos MAC BLE      */
+    char     mac[EX_MAC_MAXLEN + 1U];              /**< MAC hex completa (14 digitos)  */
     uint8_t  lvBatery;                             /**< Nivel de bateria (%) -- TODO:
                                                           todavia no se usa para nada,
                                                           reservado para animar el icono
@@ -152,8 +152,9 @@ void Menu_Init(Menu_Handle_t *h);
 void Menu_Update(Menu_Handle_t *h);
 
 /**
- * @brief  Muestra "Bluetooth Desconect." 3s, regresa g_exercise_data a sus
- *         valores base, y navega a SCREEN_MAIN_MENU.
+ * @brief  Muestra "Bluetooth Desconect.", regresa g_exercise_data a sus
+ *         valores base, parpadea el LED rojo (SecuenciasLED_FinPorDesconexion,
+ *         500ms x5) y navega a SCREEN_MAIN_MENU.
  * @note   Llamada por BluetoothTask (Tareas_Interrupciones.c) al detectar
  *         $DSCON\r fuera de un ejercicio activo.
  */

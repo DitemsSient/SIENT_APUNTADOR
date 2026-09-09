@@ -31,18 +31,27 @@ Salto confirmado en hardware (carga por USB DFU con STM32CubeProgrammer, modo US
 
 Logging serial por texto, con tag y formato tipo `printf`. Desde la migración a USB, manda por **USB CDC** (`CDC_Transmit_FS`, middleware `USB_DEVICE` generado por CubeMX) en vez de por `huart1` — `huart1` queda libre exclusivamente para Bluetooth.
 
-**Archivo:** `Logger.h` / `Logger.c` · **Versión:** 2.0.0  
+**Archivo:** `Logger.h` / `Logger.c` · **Versión:** 4.1.0  
 **Componente:** Puerto COM virtual (USB CDC), vía `USB_DEVICE/App/usbd_cdc_if.c`  
 **Requiere:** `MX_USB_DEVICE_Init()` ya haya corrido — que en `main.c` solo pasa si `Bootloader_CheckAndEnter()` **no** saltó al bootloader (ver sección `bootloader`).
 
 Formato de salida: `[TAG] mensaje\r\n`. Mensaje armado en un buffer de 160 bytes (`LOG_MAX_MSG_LEN`), se trunca silenciosamente si es más largo.
 
-**API:**
-- `Log_Init()` — llamar una vez después de `MX_USB_DEVICE_Init()`.
-- `Log_Print(tag, msg)` — manda un mensaje ya armado.
-- `Log_Printf(tag, fmt, ...)` — versión con formato, arma el mensaje con `vsnprintf` y llama a `Log_Print()`.
+**Arquitectura (7-sep-2026, migrado de mutex a cola de FreeRTOS — mismo patrón validado en el proyecto hermano Sensores):** `Log_Print`/`Log_Printf` ya NO transmiten directo ni bloquean al llamante — arman la línea y la **encolan** (`osMessageQueuePut`, timeout 0, nunca bloquea) y regresan de inmediato. Una tarea dedicada, **`LoggerTask`** (cuerpo público `Log_Task()`, creada en `Tareas_CrearTareas()` junto con las demás), es la **única** que hace la transmisión USB bloqueante real, consumiendo la cola con `osMessageQueueGet(..., osWaitForever)`. Si la cola (`LOG_QUEUE_LEN=16` entradas, cada una `{ char line[LOG_MAX_MSG_LEN]; uint16_t len; }`) se llena en una ráfaga, el mensaje se descarta y se cuenta en `s_dropped` (privado). Esto elimina el cuello de botella real que tenía el diseño anterior: con el mutex, cada tarea que logueaba pagaba el costo completo de esperar a que el USB terminara de transmitir — ahora ninguna tarea (ni las de tiempo crítico, como el gatillo) se bloquea por un log.
 
-`CDC_Transmit_FS()` puede regresar `USBD_BUSY` si el paquete anterior no ha terminado de irse — `Log_Print()` reintenta hasta `LOG_TX_TIMEOUT_MS` (100 ms) y si no, se rinde en silencio (nunca cuelga la app si no hay terminal conectada del otro lado).
+Mientras la cola no existe todavía (antes de `Log_InitQueue()`, arranque bare-metal pre-RTOS dentro de `Inicializacion_Run()`), `Log_Print()` sigue transmitiendo directo y bloqueante — en ese punto solo hay un hilo de ejecución corriendo, no hace falta la cola.
+
+**API:**
+- `Log_Init()` — llamar una vez después de `MX_USB_DEVICE_Init()` (pre-RTOS).
+- `Log_InitQueue()` — crea la cola interna. Llamar después de `osKernelInitialize()`, antes de `osKernelStart()` (ver `Tareas_InicializarMutex()`).
+- `Log_Task(argument)` — cuerpo de `LoggerTask`. Crear con `osThreadNew(Log_Task, NULL, &attr)` en `Tareas_CrearTareas()`, después de `Log_InitQueue()`. Cada vez que vacía la cola por completo (`osMessageQueueGetCount() == 0`) manda un `\r\n` extra como separador visual entre "tandas" de logs en la consola (8-sep-2026).
+- `Log_Print(tag, msg)` — manda un mensaje ya armado (no bloqueante una vez que existe la cola).
+- `Log_Printf(tag, fmt, ...)` — versión con formato, arma el mensaje con `vsnprintf` y llama a `Log_Print()`.
+- `Log_NewLine()` — línea en blanco, separador visual.
+
+`CDC_Transmit_FS()` puede regresar `USBD_BUSY` si el paquete anterior no ha terminado de irse — la transmisión real (dentro de `Log_Task`) reintenta hasta `LOG_TX_TIMEOUT_MS` (100 ms) y si no, se rinde en silencio (nunca cuelga la app si no hay terminal conectada del otro lado). También espera a que `hcdc->TxState` vuelva a `0` antes de regresar — `CDC_Transmit_FS()` solo guarda el puntero al buffer (no copia), el hardware USB lo sigue leyendo de forma asíncrona después de que la función regresa; sin esta espera, la siguiente entrada de la cola podía pisar el buffer mientras el USB todavía lo transmitía (bug real, corregido 7-sep-2026, mismo patrón que ya se había validado en el proyecto hermano).
+
+> **Regla dura relacionada (ver también sección `Tareas_Interrupciones`):** `Log_Print`/`Log_Printf` ya son seguros de llamar en la ventana entre `Tareas_InicializarMutex()` y `osKernelStart()` (antes NO lo eran, con el mutex viejo se colgaban en silencio). Lo que sigue sin ser seguro ahí es `I2C1Bus_Lock()` (ese sigue siendo mutex).
 
 ---
 
@@ -205,14 +214,15 @@ Buffers TX/RX: 256 bytes. Handle: `Bt_Handle_t { huart, tx_buf, rx_buf, rx_count
 > Además del "AT Interface" de arriba, el módulo corre su propio firmware de aplicación con mensajes `$...\r`:
 > - `$CON\r` → arranca advertising (nosotros lo mandamos, sin ack inmediato) · `$NoCON\r` → timeout 20s sin conexión
 > - `$ACKCON\r` (antes `$OK\r`) → alguien (Sensores) se conectó
-> - `$*<datos>\r` → primer payload GATT tras conectar (CSV `orden,lora,equipo,alias,vidas,balas,tiempo,mac`) → respondemos `$ACK*DATA\r`
+> - `$CONF<datos>\r` (antes `$*<datos>\r`, 7-sep-2026) → primer payload GATT tras conectar (CSV `orden,lora,equipo,alias,vidas,balas,tiempo,mac`) → respondemos `$ACKCONF\r` (antes `$ACK*DATA\r`)
 > - `$DSCON\r` → desconexión en cualquier momento → respondemos `$ACKDSCON\r` (vigilado globalmente por `BluetoothTask`, no por la pantalla de Bluetooth)
 > - `$RUN\r` → arranca el modo Ejercicio → respondemos `$ACKRUN\r` (también vigilado por `BluetoothTask`)
-> - `$END\r` → lo mandamos nosotros cuando el Ejercicio termina por tiempo agotado (no si terminó por `$DSCON`, ya no hay a quién avisarle)
+> - `$END_A\r` (antes `$END\r`, 8-sep-2026) → lo mandamos nosotros cuando el Ejercicio termina por tiempo agotado (no si terminó por `$DSCON`/`$END_S`, ya no hay a quién avisarle) → secuencia de LED "colorida" (`SecuenciasLED_FinEjercicio()`)
+> - `$END_S\r` (Sensores→Mira, 7-sep-2026) → el encargado del juego detiene el ejercicio para cualquier jugador, en cualquier momento → respondemos `$ACKEND_S\r` (vigilado globalmente por `BluetoothTask`, mismo patrón que `$DSCON`) — si hay ejercicio activo, `ExerciseTask` lo corta: pantalla "FINALIZADO"/"POR ADMIN", LED rojo x10 @400ms, +5s de espera, regresa al menú
 > - `$A_AP<balas>,<pct>\r` → lo mandamos nosotros cada 200ms si cambian las balas o la batería se mueve ≥2% (ver `ApuntadorUpdateTask` abajo)
 > - `$A_SN...\r` → **futuro, NO implementado todavía** — la PCB Sensores nos reportará cambios de vidas por ahí
 >
-> Ninguno de estos ACK espera reintento todavía de nuestro lado (si no llega, no pasa nada por ahora) — ver `Pendientes.md`.
+> `$A_AP` SÍ espera su ACK con reintento (1.5s timeout, 2 reintentos, ver `ApuntadorUpdateTask` abajo) — el resto de los ACK arriba no esperan reintento todavía de nuestro lado (si no llegan, no pasa nada por ahora) — ver `Pendientes.md`.
 
 ---
 
@@ -437,26 +447,32 @@ posible entre ellas).
 
 **Archivo:** `Tareas_Interrupciones.h` / `Tareas_Interrupciones.c` · **Versión:** 1.0.0
 
-**5 tareas (2-3 sep 2026):**
+**6 tareas (2-7 sep 2026):**
 
 | Tarea | Periodo | Corre | Qué hace |
 |---|---|---|---|
-| `MenuTask` | 20 ms | Siempre, salvo suspendida durante un Ejercicio | `Menu_Poll()` + `Menu_Update()` (navegación/pantallas), reporta heap libre en su primera vuelta, imprime el log diferido del gatillo |
-| `LuzMuxTask` | 10 s | Siempre | Lee TSL2571, ajusta `Mux_Laser` (potencia del láser) según luz ambiental, lee `BatGauge_Update()` y actualiza `g_exercise_data.lvBatery` |
-| `BluetoothTask` | 20 ms | Siempre | Vigila `$DSCON`/`$RUN` de forma global (incluso con `MenuTask` suspendida), responde sus ACK, arranca/corta el Ejercicio |
-| `ExerciseTask` | — (loop corto 150 ms dentro) | Solo durante un Ejercicio — nace suspendida, la reanuda `Tareas_IniciarEjercicio()` | Cuenta regresiva 10..1, `"!INICIA!"`, alterna pantallas balas/vidas ↔ equipo/jugador cada `EXERCISE_PANTALLA_MS`, refresca balas/vidas/batería cada 1s, controla el temporizador general, manda `$END\r` y corre la secuencia de LED al terminar |
-| `ApuntadorUpdateTask` | 200 ms | Solo durante un Ejercicio — mismo ciclo de vida que `ExerciseTask` | Compara balas/batería contra el último valor mandado, manda `$A_AP<balas>,<pct>\r` si cambiaron |
+| `LoggerTask` | — (bloqueante en la cola) | Siempre | Cuerpo `Log_Task()` (vive en `Logger.c`) — consume la cola del Logger y hace la transmisión USB CDC real. Ver sección `Logger`. |
+| `MenuTask` | 20 ms | Siempre, salvo pausada durante un Ejercicio | `Menu_Poll()` + `Menu_Update()` (navegación/pantallas), reporta heap libre en su primera vuelta, imprime el log diferido del gatillo |
+| `LuzMuxTask` | 20 s | Siempre | Lee TSL2571, ajusta `Mux_Laser` (potencia del láser) según luz ambiental, lee `BatGauge_Update()` y actualiza `g_exercise_data.lvBatery` |
+| `BluetoothTask` | 20 ms | Siempre | Vigila `$DSCON`/`$END_S`/`$RUN`/`$ACKA_AP` de forma global (incluso con `MenuTask` pausada), responde sus ACK, arranca/corta el Ejercicio |
+| `ExerciseTask` | — (loop corto 150 ms dentro) | Solo durante un Ejercicio — nace suspendida, la reanuda `Tareas_IniciarEjercicio()` | Cuenta regresiva 10..1, `"!INICIA!"`, alterna pantallas balas/vidas ↔ equipo/jugador cada `EXERCISE_PANTALLA_MS`, refresca balas/vidas/batería cada 1s, controla el temporizador general; termina por tiempo agotado (manda `$END\r`), por `$DSCON`, o por `$END_S` (parado por admin) — cada motivo con su propia pantalla/secuencia de LED |
+| `ApuntadorUpdateTask` | 200 ms | Solo durante un Ejercicio — mismo ciclo de vida que `ExerciseTask` | Compara balas/batería contra el último valor mandado, manda `$A_AP<balas>,<pct>\r` con ACK+reintento (`ApuntadorUpdateTask_EnviarConAck()`, 1.5s timeout, 2 reintentos) |
 
 **Suspender/reanudar en vez de crear/destruir:** `ExerciseTask` y `ApuntadorUpdateTask` se crean una sola vez (`Tareas_CrearTareas()`) y nacen suspendidas — cada `$RUN` las reanuda, cada fin de ejercicio se auto-suspenden. Así se evita la sobrecarga/riesgo de `osThreadNew`/terminar tareas en caliente.
 
-**Banderas compartidas** (todas `static volatile bool`, viven en este archivo):
+> **Pausa COOPERATIVA de `MenuTask` (regla dura, 7-sep-2026):** `MenuTask` nunca se suspende con `osThreadSuspend()` llamado desde otra tarea — si estuviera a mitad de una transacción I2C (con `I2C1Bus_Lock()` tomado) justo en ese instante, se congelaría sin soltar el mutex, y cualquier otra tarea que después necesite I2C1 se queda esperando para siempre (confirmado en pruebas: un `$RUN\r` llegando a media escritura del OLED congelaba todo el sistema). En vez de eso: `MenuTask_PausarYEsperar(timeout_ms)` prende una bandera que `MenuTask` revisa al inicio de cada vuelta de su loop (punto seguro, nunca a medio mutex) y ahí se suspende **a sí misma**; el caller espera (con timeout) la confirmación antes de tocar el display él mismo. `MenuTask_Reanudar()` para reactivarla. Usado en `Tareas_IniciarEjercicio()`, en el manejo de `$DSCON` fuera de un ejercicio, y al terminar `ExerciseTask`.
+
+**Banderas compartidas** (todas `static volatile`, viven en este archivo):
 - `s_ejercicio_activo` — true mientras `ExerciseTask` corre un ejercicio
-- `s_dscon_en_ejercicio` — la pone `BluetoothTask` si llega `$DSCON` en medio de un ejercicio; `ExerciseTask` la revisa y aborta
+- `s_dscon_en_ejercicio` — la pone `BluetoothTask` si llega `$DSCON` en medio de un ejercicio; `ExerciseTask` y `ApuntadorUpdateTask` la revisan y abortan
+- `s_end_admin_en_ejercicio` — la pone `BluetoothTask` si llega `$END_S` en medio de un ejercicio; mismo patrón que `s_dscon_en_ejercicio`, `ExerciseTask` y `ApuntadorUpdateTask` la revisan y abortan
 - `ejercicio_disparo_habilitado` (declarada en `Transmsion_Laser_IR.h`, la consulta el gatillo) — false durante la cuenta regresiva, true después de `"!INICIA!"`, false al terminar
+- `s_ack_pendiente` (`AckEstado_e`: `ACK_NINGUNO`/`ACK_A_AP`/...) — qué ACK se está esperando ahora mismo, un solo valor pendiente a la vez en todo el sistema
+- `s_menuTask_pausar`/`s_menuTask_pausada` — protocolo de pausa cooperativa de `MenuTask` (ver arriba)
 
 **API:**
-- `Tareas_InicializarMutex()` — crea los mutex (`Log_InitMutex()`, `I2C1Bus_InitMutex()`) — llamar tras `osKernelInitialize()`, antes de `osKernelStart()`
-- `Tareas_CrearTareas()` — crea las 5 tareas — llamar antes de `osKernelStart()`
+- `Tareas_InicializarMutex()` — crea la cola del Logger (`Log_InitQueue()`) y el mutex de `I2C1_Bus` (`I2C1Bus_InitMutex()`) — llamar tras `osKernelInitialize()`, antes de `osKernelStart()`
+- `Tareas_CrearTareas()` — crea las 6 tareas — llamar antes de `osKernelStart()`
 
 > **REGLA DURA:** nunca llamar `Log_Print`/`Log_Printf` ni `I2C1Bus_Lock()` entre `Tareas_InicializarMutex()` y `osKernelStart()` — el mutex ya existe pero el scheduler no corre, `osMutexAcquire(..., osWaitForever)` se cuelga para siempre en silencio (confirmado, costó una tarde de debug). Cualquier log/I2C en esa ventana hay que diferirlo a la primera vuelta de una tarea (ver `MenuTask`).
 
@@ -478,20 +494,24 @@ deja una de las dos transacciones a medias en silencio — síntoma real observa
 que el bug siguiera apareciendo — ver `Pendientes.md`).
 
 **API:**
-- `I2C1Bus_InitMutex()` — crea el mutex, llamar junto con `Log_InitMutex()` en `Tareas_InicializarMutex()`
+- `I2C1Bus_InitMutex()` — crea el mutex, llamar junto con `Log_InitQueue()` en `Tareas_InicializarMutex()`
 - `I2C1Bus_Lock()` / `I2C1Bus_Unlock()` — envolver cada transacción I2C1 real (bloqueante, `osWaitForever` — seguro porque cada llamada HAL ya tiene su propio timeout interno, así que el mutex siempre se libera)
 
 ---
 
 ## Secuencias_LED
 
-Catálogo de secuencias de parpadeo del LED RGB con significado fijo — para no tener que
-adivinar qué parpadeo es cuál, y porque en la práctica no siempre hay Logger a la mano.
+**Punto único de control del LED RGB para todo el firmware (8-sep-2026)** — antes había llamadas sueltas a `LedRGB_*` regadas en `Menu_Bluetooth.c` y `PowerManager.c` además de aquí; se centralizó todo para no tener parpadeos inconsistentes. Cubre dos cosas: (1) el catálogo de secuencias de un solo tiro con significado fijo (fin de ejercicio, desconexión, etc.), y (2) helpers no bloqueantes para pantallas con su propio loop de polling (ej. Bluetooth parpadeando azul mientras espera conexión).
 
-**Archivo:** `Secuencias_LED.h` / `Secuencias_LED.c` · **Versión:** 1.0.0
+**Archivo:** `Secuencias_LED.h` / `Secuencias_LED.c` · **Versión:** 2.0.0
 
-**API:**
-- `SecuenciasLED_FinEjercicio()` — arcoíris (6 colores, 500ms c/u) × 2 vueltas + rojo on/off 1s × 3 (fin normal, tiempo agotado)
-- `SecuenciasLED_FinPorDesconexion()` — rojo parpadeando 800ms × 4 (fin por `$DSCON` en medio del ejercicio)
+**API — helpers genéricos:**
+- `SecuenciasLED_Apagar()` / `SecuenciasLED_Fijo(color)` — wrappers directos de `LedRGB_Off()`/`LedRGB_SetColor()`
+- `SecuenciasLED_ParpadeoNoBloqueanteReset(tick, on)` / `...Tick(color, tick, on, period_ms)` — parpadeo no bloqueante genérico; el caller es dueño de sus propias variables `tick`/`on` (estáticas de su archivo), esta función solo las maneja. Usado por `Menu_Bluetooth.c` (azul, mientras se espera `$ACKCON`)
 
-> El parpadeo verde/rojo × 3 del bootloader (`Bootloader.c`, `Bootloader_BlinkLed()`) NO vive aquí a propósito — es ruta crítica (indica si se entró a modo DFU) y no se quiso tocar ese archivo. Documentado solo como referencia.
+**API — catálogo de secuencias (bloqueantes, un solo tiro):**
+- `SecuenciasLED_FinEjercicio()` — ciclo Rojo-Verde-Azul-Magenta, 300ms c/u × 3 vueltas (fin normal, tiempo agotado — homogenizado con Sensores, 8-sep-2026)
+- `SecuenciasLED_FinPorDesconexion()` — cyan parpadeando 400ms × 5 (`$DSCON`, tanto en medio del ejercicio como fuera de uno vía `Menu_HandleDisconnect()`, 8-sep-2026 — antes rojo 500ms×5)
+- `SecuenciasLED_FinPorAdmin()` — rojo parpadeando 400ms × 5 (fin por `$END_S` en medio del ejercicio, 8-sep-2026 — antes rojo 400ms×10)
+
+> Dos excepciones deliberadas que SÍ siguen llamando a `LedRGB_*` directo, no migradas a propósito: el parpadeo verde/rojo × 3 del bootloader (`Bootloader.c`, `Bootloader_BlinkLed()` — ruta crítica de modo DFU, no se quiso tocar ese archivo) y los usos sueltos en `Test.c` (banco de pruebas de bring-up, prueba el driver directo a propósito, no es parte del flujo real de juego). El resto del firmware (`Inicializacion.c` con `LedRGB_Init()`, `Menu_TestHW.c` con `LedRGB_Test()`) llama al driver directo porque son las llamadas de inicialización/self-test del driver mismo, no "secuencias" con significado de evento.

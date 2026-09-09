@@ -3,23 +3,27 @@
  * @brief   Bluetooth advertise screen — enters advertising, waits for connection.
  *
  * @details Protocolo real del modulo (firmware BL654 propio, confirmado
- *          2-sep-2026 -- esquema de ACKs homogeneizado, ver Pendientes.md):
+ *          7-sep-2026 -- $CONF reemplaza al marcador '*', ver Pendientes.md):
  *          - $CON\r          → arranca advertising (sin ack inmediato)
  *          - $NoCON\r        → pasaron 20s sin conexion, hay que reenviar $CON
  *          - $ACKCON\r       → alguien (Sensores) se conecto (antes $OK\r)
- *          - $*<datos>\r     → primer dato GATT tras conectar: datos de
+ *          - $CONF<datos>\r  → primer dato GATT tras conectar: datos de
  *                              juego separados por coma (ver bt_parse_
- *                              exercise_data), el '*' marca que hay que
- *                              parsear y guardar en g_exercise_data.
- *                              Responde $ACK*DATA\r si el parseo fue exitoso.
+ *                              exercise_data), "CONF" (de "configuracion")
+ *                              marca que hay que parsear y guardar en
+ *                              g_exercise_data. Responde $ACKCONF\r si el
+ *                              parseo fue exitoso (antes era '*'/$ACK*DATA).
  *          - $<dato>\r       → cualquier dato posterior (fuera de este flujo)
  *          - $DSCON\r        → desconexion en cualquier momento (manejado
  *                              de forma global en BluetoothTask, no aqui)
  *          - $RUN\r          → arranca el modo Ejercicio (manejado de forma
  *                              global en BluetoothTask, no aqui)
  *
- *          Formato de $*<datos>\r (separado por comas):
+ *          Formato de $CONF<datos>\r (separado por comas):
  *          orden,lora,equipo,alias,vidas,balas,tiempo,mac
+ *          mac: MAC hex completa (14 digitos) -- se guarda entera en
+ *          g_exercise_data.mac, en pantalla (BT_MAIN) solo se muestran los
+ *          ultimos 8 digitos.
  *
  *          State flow:
  *
@@ -38,7 +42,7 @@
  *          ┌────┴────┐
  *          ▼         ▼
  *     BT_ESPERANDO  BT_SPLASH_ERR
- *     Espera $*<datos>\r, parsea y responde $ACK*DATA\r
+ *     Espera $CONF<datos>\r, parsea y responde $ACKCONF\r
  *          │
  *          ▼
  *     BT_SPLASH_OK
@@ -52,7 +56,7 @@
 #include "Menu/Menu_Screens.h"
 #include "Bluetooth.h"
 #include "Inicializacion.h"
-#include "LedRGB.h"
+#include "Secuencias_LED.h"
 #include "Logger.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
@@ -75,7 +79,7 @@ void Screen_Bluetooth_ResetLink(void)
 
 /**
  * @brief  Parsea "orden,lora,equipo,alias,vidas,balas,tiempo,mac" en out.
- * @param  payload  Texto a partir de despues del '*' (sin el '$' ni el '\r').
+ * @param  payload  Texto a partir de despues de "CONF" (sin el '$' ni el '\r').
  * @return true si los 8 campos se parsearon correctamente.
  */
 static bool bt_parse_exercise_data(const char *payload, ExerciseGameData_t *out)
@@ -126,9 +130,36 @@ static bool bt_parse_exercise_data(const char *payload, ExerciseGameData_t *out)
 /* ========================  CONSTANTS  ==================================== */
 
 #define BT_SPLASH_MS        3000U
-#define BT_LED_BLINK_MS     700U
+#define BT_LED_BLINK_MS     500U
 #define BT_MAC_TIMEOUT_MS   20000U /**< Espera del $1<MAC>\r tras el $OK\r
                                         (handshake BLE + GATT puede tardar) */
+
+/* Comando que hace que el BL654 corra su programa cargado ("Apuntador"),
+ * ya que todavia no tenemos el autorun configurado en el modulo. */
+#define BT_CMD_RUNBLE       "AT+RUN \"Apuntador\"\r\n"
+
+/**
+ * @brief  Manda BT_CMD_RUNBLE al BL654 y muestra "Cod BLE Corriendo" 2s.
+ * @note   El comando hace que el modulo corra el programa "Apuntador" ya
+ *         cargado, sin necesidad de JTAG (todavia no hay autorun). El
+ *         modulo no regresa respuesta a este comando (confirmado en
+ *         pruebas), asi que no se espera nada por UART.
+ */
+static void bt_send_runble(void)
+{
+    static const uint8_t cmd[] = BT_CMD_RUNBLE;
+
+    Bt_ResetRx(&Bluetooth);
+    Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U);
+
+    ssd1306_clearDisplay();
+    ssd1306_setTextSize(1U);
+    ssd1306_setTextColor(WHITE);
+    ssd1306_printCentered("Cod BLE",   10, &Font5x7);
+    ssd1306_printCentered("Corriendo", 20, &Font5x7);
+    ssd1306_display();
+    HAL_Delay(2000U);
+}
 
 /* ========================  DRAW  ========================================= */
 
@@ -142,8 +173,14 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             ssd1306_setTextColor(WHITE);
 
             if (s_bt_linked) {
-                char line[MENU_MAX_CHARS + 1U];
-                snprintf(line, sizeof(line), "Id:%.7s", g_exercise_data.mac);
+                /* Se guarda la MAC completa (14 digitos), en pantalla solo
+                 * caben/importan los ultimos 8. */
+                size_t mac_len = strlen(g_exercise_data.mac);
+                const char *mac_tail = (mac_len > 8U) ?
+                    &g_exercise_data.mac[mac_len - 8U] : g_exercise_data.mac;
+
+                char line[12U]; /* "Id:" + 8 digitos + NUL */
+                snprintf(line, sizeof(line), "Id:%.8s", mac_tail);
                 ssd1306_setCursor(0, 0);
                 ssd1306_print(line, &Font5x7);
 
@@ -151,8 +188,8 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                 ssd1306_setCursor(0, y);
                 ssd1306_print("> Salir", &Font5x7);
             } else {
-                const char *opts[] = { "Anunciar", "Salir" };
-                for (uint8_t i = 0U; i < 2U; i++) {
+                const char *opts[] = { "Anunciar", "RunBLE", "Salir" };
+                for (uint8_t i = 0U; i < 3U; i++) {
                     int16_t y = (int16_t)(8 + i * MENU_LINE_H);
                     ssd1306_setCursor(0, y);
                     ssd1306_print((i == h->selected) ? "> " : "  ", &Font5x7);
@@ -174,9 +211,7 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             Bt_SendAdvertise(&Bluetooth);
             h->sub_state   = (uint8_t)BT_BUSCANDO;
             h->splash_tick = HAL_GetTick();
-            s_led_tick      = HAL_GetTick();
-            s_led_on        = false;
-            LedRGB_Off();
+            SecuenciasLED_ParpadeoNoBloqueanteReset(&s_led_tick, &s_led_on);
             h->needs_redraw = true;
             break;
 
@@ -188,12 +223,9 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             ssd1306_printCentered(". . .",   18, &Font5x7);
             ssd1306_display();
 
-            /* Parpadeo azul cada 1s mientras se espera */
-            if ((HAL_GetTick() - s_led_tick) >= BT_LED_BLINK_MS) {
-                s_led_tick = HAL_GetTick();
-                s_led_on   = !s_led_on;
-                LedRGB_SetColor(s_led_on ? RGB_BLUE : RGB_OFF);
-            }
+            /* Parpadeo azul mientras se espera */
+            SecuenciasLED_ParpadeoNoBloqueanteTick(RGB_BLUE, &s_led_tick, &s_led_on,
+                                                    BT_LED_BLINK_MS);
 
             if (Bluetooth.rx_ready) {
                 if (Bluetooth.rx_count >= 6U &&
@@ -203,18 +235,18 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                     Log_Print("BT", "ACKCON recibido -- conectado");
                     Bt_ResetRx(&Bluetooth);
                     Bt_ResetRawDebug(&Bluetooth);
-                    LedRGB_SetColor(RGB_BLUE);
+                    SecuenciasLED_Fijo(RGB_BLUE);
                     h->sub_state   = (uint8_t)BT_ESPERANDO;
                     h->splash_tick = HAL_GetTick();
                 } else {
                     /* $NoCON\r u otra cosa inesperada */
                     Bt_ResetRx(&Bluetooth);
-                    LedRGB_Off();
+                    SecuenciasLED_Apagar();
                     h->sub_state   = (uint8_t)BT_SPLASH_ERR;
                     h->splash_tick = HAL_GetTick();
                 }
             } else if ((HAL_GetTick() - h->splash_tick) >= BT_ADVERTISE_TIMEOUT_MS) {
-                LedRGB_Off();
+                SecuenciasLED_Apagar();
                 h->sub_state   = (uint8_t)BT_SPLASH_ERR;
                 h->splash_tick = HAL_GetTick();
             }
@@ -232,25 +264,26 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             /* LED se queda fijo en azul (ya no parpadea) desde que llego el $OK\r */
 
             if (Bluetooth.rx_ready) {
-                if (Bluetooth.rx_count > 0U && Bluetooth.rx_buffer[0] == '*' &&
-                    bt_parse_exercise_data((char *)&Bluetooth.rx_buffer[1], &g_exercise_data)) {
+                if (Bluetooth.rx_count >= 4U &&
+                    strncmp((char *)Bluetooth.rx_buffer, "CONF", 4U) == 0 &&
+                    bt_parse_exercise_data((char *)&Bluetooth.rx_buffer[4], &g_exercise_data)) {
                     Inicializacion_PrintExerciseData();
 
-                    static const uint8_t ack[] = "$ACK*DATA\r";
+                    static const uint8_t ack[] = "$ACKCONF\r";
                     Bt_Transmit(&Bluetooth, ack, sizeof(ack) - 1U);
 
-                    LedRGB_Off();
+                    SecuenciasLED_Apagar();
                     s_bt_linked     = true;
                     h->bt_connected = true;
                     h->sub_state    = (uint8_t)BT_SPLASH_OK;
                 } else {
-                    LedRGB_Off();
+                    SecuenciasLED_Apagar();
                     h->sub_state = (uint8_t)BT_SPLASH_ERR;
                 }
                 Bt_ResetRx(&Bluetooth);
                 h->splash_tick = HAL_GetTick();
             } else if ((HAL_GetTick() - h->splash_tick) >= BT_MAC_TIMEOUT_MS) {
-                LedRGB_Off();
+                SecuenciasLED_Apagar();
                 h->sub_state   = (uint8_t)BT_SPLASH_ERR;
                 h->splash_tick = HAL_GetTick();
             }
@@ -309,14 +342,20 @@ void Screen_Bluetooth_OnButton(Menu_Handle_t *h, MenuButton_e btn)
         return;
     }
 
-    /* Disconnected: Anunciar / Salir */
+    /* Disconnected: Anunciar / RunBLE / Salir */
     if (btn == BTN_NAVIGATE) {
-        h->selected = (h->selected == 0U) ? 1U : 0U;
+        h->selected++;
+        if (h->selected >= 3U) {
+            h->selected = 0U;
+        }
         h->needs_redraw = true;
 
     } else if (btn == BTN_ENTER) {
-        if (h->selected == 1U) {
+        if (h->selected == 2U) {
             Menu_GoTo(h, SCREEN_MAIN_MENU);
+        } else if (h->selected == 1U) {
+            bt_send_runble();
+            h->needs_redraw = true;
         } else {
             h->sub_state    = (uint8_t)BT_INICIANDO;
             h->needs_redraw = true;

@@ -21,29 +21,21 @@
 #include "Menu/Menu_Screens.h"
 #include "ModoProgramacion.h"
 #include "Logger.h"
-#include "Bluetooth.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include <string.h>
-
-extern Bt_Handle_t Bluetooth;
 
 /* ========================  CONSTANTS  ==================================== */
 
 #define PROG_SPLASH_MS      3000U
 
-/* Option indices — el boton RUN solo existe en modo MCU */
+/* Option indices */
 #define PROG_OPT_SWITCH     0U   /* Bluetooth (from MCU) or MCU (from BT) */
-#define PROG_OPT_RUN        1U   /* Solo en PROG_MCU                      */
-#define PROG_OPT_SALIR_MCU  2U
-#define PROG_OPT_COUNT_MCU  3U
+#define PROG_OPT_SALIR_MCU  1U
+#define PROG_OPT_COUNT_MCU  2U
 
 #define PROG_OPT_SALIR_BT   1U
 #define PROG_OPT_COUNT_BT   2U
-
-/* Comando que hace que el BL654 corra su programa cargado ("Apuntador"),
- * ya que todavia no tenemos el autorun configurado en el modulo. */
-#define PROG_CMD_RUN        "AT+RUN \"Apuntador\"\r\n"
 
 /* ========================  STATIC FUNCTIONS  ============================== */
 
@@ -77,29 +69,6 @@ static void prog_draw_menu(const char *header, const char *const *labels,
 }
 
 /**
- * @brief  Manda PROG_CMD_RUN al BL654 y muestra "Cod BLE Corriendo" 2s.
- * @note   El comando hace que el modulo corra el programa "Apuntador" ya
- *         cargado, sin necesidad de JTAG (todavia no hay autorun). El
- *         modulo no regresa respuesta a este comando (confirmado en
- *         pruebas), asi que no se espera nada por UART.
- */
-static void prog_send_run(void)
-{
-    static const uint8_t cmd[] = PROG_CMD_RUN;
-
-    Bt_ResetRx(&Bluetooth);
-    Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U);
-
-    ssd1306_clearDisplay();
-    ssd1306_setTextSize(1U);
-    ssd1306_setTextColor(WHITE);
-    ssd1306_printCentered("Cod BLE",   10, &Font5x7);
-    ssd1306_printCentered("Corriendo", 20, &Font5x7);
-    ssd1306_display();
-    HAL_Delay(2000U);
-}
-
-/**
  * @brief  Draws the timed splash screen.
  * @param  line1  First centered line (e.g. "Modo BT").
  */
@@ -120,7 +89,7 @@ void Screen_Programming_Draw(Menu_Handle_t *h)
     switch ((ProgSubState_e)h->sub_state) {
 
         case PROG_MCU: {
-            const char *labels[PROG_OPT_COUNT_MCU] = { "Bluetoot", "RUN", "Salir" };
+            const char *labels[PROG_OPT_COUNT_MCU] = { "Bluetoot", "Salir" };
             prog_draw_menu("Mode: MCU", labels, PROG_OPT_COUNT_MCU, h->selected);
             break;
         }
@@ -180,12 +149,6 @@ void Screen_Programming_OnButton(Menu_Handle_t *h, MenuButton_e btn)
     if (btn == BTN_ENTER) {
         if (h->selected == opt_salir) {
             Menu_GoTo(h, SCREEN_MAIN_MENU);
-            return;
-        }
-
-        if (is_mcu && h->selected == PROG_OPT_RUN) {
-            prog_send_run();
-            h->needs_redraw = true;
             return;
         }
 

@@ -11,6 +11,7 @@
 #include "Menu/Menu_Screens.h"
 #include "ModoProgramacion.h"
 #include "Logger.h"
+#include "Secuencias_LED.h"
 #include "Display_Oled/Display_Comands.h"
 #include "Display_Oled/Display_Fonts.h"
 #include "Display_Oled/Display_Bitmaps.h"
@@ -192,7 +193,8 @@ void Menu_HandleDisconnect(Menu_Handle_t *h)
     ssd1306_printCentered("Bluetooth",    6, &Font5x7);
     ssd1306_printCentered("Desconect.", 18, &Font5x7);
     ssd1306_display();
-    HAL_Delay(3000U);
+
+    SecuenciasLED_FinPorDesconexion();
 
     Menu_GoTo(h, SCREEN_MAIN_MENU);
 }
