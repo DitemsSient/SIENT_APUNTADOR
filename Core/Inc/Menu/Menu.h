@@ -125,12 +125,14 @@ typedef struct {
     char     player_name[EX_PLAYER_NAME_MAXLEN + 1U]; /**< Alias, NUL-terminated      */
     uint8_t  lives;                                /**< Vidas restantes               */
     uint16_t ammo;                                 /**< Balas restantes                */
-    uint32_t tiempo;                               /**< Tiempo de partida (s)          */
+    uint32_t tiempo;                               /**< Tiempo de partida (min); 0 = ilimitado */
     char     mac[EX_MAC_MAXLEN + 1U];              /**< MAC hex completa (14 digitos)  */
-    uint8_t  lvBatery;                             /**< Nivel de bateria (%) -- TODO:
-                                                          todavia no se usa para nada,
-                                                          reservado para animar el icono
-                                                          de bateria del HUD              */
+    uint8_t  lvBatery;                             /**< Nivel de bateria de Mira (%) --
+                                                          NO viene de Bluetooth, lo llena
+                                                          LuzMuxTask con la lectura real
+                                                          del BQ27441 (BatteryMonitor).
+                                                          Ya se usa en el HUD via
+                                                          HUD_DrawBateryLevel().          */
 } ExerciseGameData_t;
 
 extern ExerciseGameData_t g_exercise_data;

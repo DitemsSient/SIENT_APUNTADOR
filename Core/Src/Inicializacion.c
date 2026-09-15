@@ -426,6 +426,14 @@ void Inicializacion_Run(void) {
     } else {
         Log_Print("BT", "Sin respuesta");
     }
+
+    /* Corre el programa "Apuntador" ya cargado en el modulo -- siempre, sin
+     * importar el resultado del test de arriba (14-sep-2026, antes era un
+     * boton "RunBLE" en la pantalla de Bluetooth; ahora se manda una sola
+     * vez aqui, como parte de la inicializacion). */
+    Bt_SendRunBLE(&Bluetooth);
+    Log_Print("BT", "RunBLE enviado");
+
     Log_NewLine();
     HAL_Delay(500U);
 #endif

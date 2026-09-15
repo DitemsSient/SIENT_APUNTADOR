@@ -25,6 +25,7 @@
 #include "Display_Oled/Display_Fonts.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /**
  * @brief  Imprime el log del ultimo disparo del gatillo si quedo pendiente.
@@ -259,11 +260,12 @@ static void LuzMuxTask(void *argument) {
 #define EXERCISE_PANTALLA_MS        5000U
 #define EXERCISE_REFRESH_STATS_MS   1000U
 
-/* NOTA: g_exercise_data.tiempo se trata como SEGUNDOS mientras se prueba
- * en banco -- en el proyecto real es en MINUTOS. Cuando se confirme,
- * cambiar EXERCISE_TIEMPO_MULTIPLICADOR_MS de 1000U a 60000U.
- * Ver Pendientes.md. */
-#define EXERCISE_TIEMPO_MULTIPLICADOR_MS   1000U
+/* g_exercise_data.tiempo esta en MINUTOS (confirmado 14-sep-2026, antes se
+ * trataba como segundos mientras se probaba en banco). tiempo == 0 significa
+ * tiempo ILIMITADO -- ver el chequeo explicito mas abajo, antes de comparar
+ * contra duracion_ms. En ese caso la unica forma de terminar el ejercicio es
+ * via $END_S/$END_M/$DSCON (Sensores manda el END, nunca por temporizador). */
+#define EXERCISE_TIEMPO_MULTIPLICADOR_MS   60000U
 
 static osThreadId_t s_exerciseTaskHandle = NULL;
 static const osThreadAttr_t s_exerciseTask_attr = {
@@ -305,26 +307,36 @@ static volatile bool s_dscon_en_ejercicio = false;
  * ejercicio en cualquier momento para cualquier jugador. */
 static volatile bool s_end_admin_en_ejercicio = false;
 
+/* Idem, para $END_M -- Sensores nos avisa que este jugador se quedo sin
+ * vidas (murio), en cualquier momento durante el ejercicio. */
+static volatile bool s_end_muerte_en_ejercicio = false;
+
 /** @brief Motivo por el que ExerciseTask salio de su ciclo principal. */
 typedef enum {
     EXFIN_NORMAL = 0,  /* tiempo agotado, fin normal */
     EXFIN_DSCON,        /* $DSCON recibido */
     EXFIN_ADMIN,         /* $END_S recibido */
+    EXFIN_MUERTE,        /* $END_M recibido -- sin vidas */
 } ExercicioFinMotivo_e;
 
 static void ExerciseTask(void *argument) {
     (void)argument;
 
     for (;;) {
-        Log_Printf("EJERCICIO", "Inicio -- duracion %lu s (tratado como segundos, ver nota)",
-                   (unsigned long)g_exercise_data.tiempo);
+        if (g_exercise_data.tiempo == 0U) {
+            Log_Print("EJERCICIO", "Inicio -- tiempo ILIMITADO (tiempo=0)");
+        } else {
+            Log_Printf("EJERCICIO", "Inicio -- duracion %lu min",
+                       (unsigned long)g_exercise_data.tiempo);
+        }
 
         /* ---- Cuenta regresiva 10..1 ---- */
         ExercicioFinMotivo_e motivo = EXFIN_NORMAL;
         for (uint8_t n = 10U; n >= 1U; n--) {
             gatillo_log_si_pendiente();
-            if (s_dscon_en_ejercicio)     { motivo = EXFIN_DSCON; break; }
-            if (s_end_admin_en_ejercicio) { motivo = EXFIN_ADMIN; break; }
+            if (s_dscon_en_ejercicio)      { motivo = EXFIN_DSCON;  break; }
+            if (s_end_admin_en_ejercicio)  { motivo = EXFIN_ADMIN;  break; }
+            if (s_end_muerte_en_ejercicio) { motivo = EXFIN_MUERTE; break; }
 
             char buf[5];
             snprintf(buf, sizeof(buf), "%u", n);
@@ -367,10 +379,15 @@ static void ExerciseTask(void *argument) {
 
                 gatillo_log_si_pendiente();
 
-                if (s_dscon_en_ejercicio)     { motivo = EXFIN_DSCON; break; }
-                if (s_end_admin_en_ejercicio) { motivo = EXFIN_ADMIN; break; }
+                if (s_dscon_en_ejercicio)      { motivo = EXFIN_DSCON;  break; }
+                if (s_end_admin_en_ejercicio)  { motivo = EXFIN_ADMIN;  break; }
+                if (s_end_muerte_en_ejercicio) { motivo = EXFIN_MUERTE; break; }
 
-                if ((HAL_GetTick() - tick_inicio_ejercicio) >= duracion_ms) {
+                /* tiempo == 0 -> duracion_ms == 0 -> ilimitado, nunca
+                 * termina por temporizador (solo por $DSCON/$END_S/$END_M,
+                 * ya revisados arriba). */
+                if ((duracion_ms != 0U) &&
+                    ((HAL_GetTick() - tick_inicio_ejercicio) >= duracion_ms)) {
                     break;  /* fin normal, tiempo agotado */
                 }
 
@@ -421,6 +438,16 @@ static void ExerciseTask(void *argument) {
 
             SecuenciasLED_FinPorAdmin();
             osDelay(5000U);
+        } else if (motivo == EXFIN_MUERTE) {
+            Log_Print("EJERCICIO", "Terminado -- $END_M recibido (sin vidas)");
+
+            ssd1306_clearDisplay();
+            ssd1306_setTextSize(1U);
+            ssd1306_setTextColor(WHITE);
+            ssd1306_printCentered("HAS MUERTO", 12, &Font5x7);
+            ssd1306_display();
+
+            SecuenciasLED_FinEjercicio();
         } else {
             Log_Print("EJERCICIO", "Terminado -- tiempo agotado");
 
@@ -440,9 +467,10 @@ static void ExerciseTask(void *argument) {
             SecuenciasLED_FinEjercicio();
         }
 
-        s_ejercicio_activo       = false;
-        s_dscon_en_ejercicio     = false;
-        s_end_admin_en_ejercicio = false;
+        s_ejercicio_activo        = false;
+        s_dscon_en_ejercicio      = false;
+        s_end_admin_en_ejercicio  = false;
+        s_end_muerte_en_ejercicio = false;
 
         Menu_GoTo(&hmenu, SCREEN_MAIN_MENU);
         MenuTask_Reanudar();
@@ -461,9 +489,10 @@ static void ExerciseTask(void *argument) {
  *         un ejercicio activo.
  */
 static void Tareas_IniciarEjercicio(void) {
-    s_ejercicio_activo          = true;
-    s_dscon_en_ejercicio        = false;
-    s_end_admin_en_ejercicio    = false;
+    s_ejercicio_activo           = true;
+    s_dscon_en_ejercicio         = false;
+    s_end_admin_en_ejercicio     = false;
+    s_end_muerte_en_ejercicio    = false;
     ejercicio_disparo_habilitado = false;  /* se prende al terminar la cuenta */
 
     /* Pausa MenuTask de forma segura (nunca a medio mutex I2C) ANTES de
@@ -487,10 +516,11 @@ static void Tareas_IniciarEjercicio(void) {
 }
 
 /* ===========================================================================
- *  BluetoothTask -- vigila $DSCON, $END_S y $RUN de forma global (cualquier
- *  pantalla, incluso con MenuTask suspendida durante el Ejercicio) y
- *  responde su ACK correspondiente. El resto de mensajes ($ACKCON,
- *  $NoCON, $CONF<datos>) se dejan intactos para que Menu_Bluetooth.c los
+ *  BluetoothTask -- vigila $DSCON, $END_S, $END_M, $RUN, $CONF<datos> y
+ *  $A_SN<vidas> de forma global (cualquier pantalla, incluso con MenuTask
+ *  suspendida durante el Ejercicio) y responde su ACK correspondiente
+ *  (menos $A_SN, que es solo informativo). El resto de mensajes ($ACKCON,
+ *  $NoCON) se dejan intactos para que Menu_Bluetooth.c los
  *  siga consumiendo igual que antes.
  * ===========================================================================
  */
@@ -547,6 +577,22 @@ static void BluetoothTask(void *argument) {
                     s_end_admin_en_ejercicio = true;  /* ExerciseTask reacciona */
                 }
 
+            } else if (Bluetooth.rx_count >= 5U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "END_M", 5U) == 0) {
+
+                /* $END_M -- Sensores detecto que este jugador se quedo sin
+                 * vidas. Mismo patron que $END_S/$DSCON: vigilado en
+                 * cualquier momento; si hay ejercicio activo, ExerciseTask
+                 * lo corta mostrando "HAS MUERTO" con la secuencia de LED
+                 * de fin normal. */
+                Log_Print("BT-TASK", "END_M recibido");
+                Bt_ResetRx(&Bluetooth);
+                bt_task_send_ack("$ACKEND_M\r");
+
+                if (s_ejercicio_activo) {
+                    s_end_muerte_en_ejercicio = true;  /* ExerciseTask reacciona */
+                }
+
             } else if (Bluetooth.rx_count >= 3U &&
                        strncmp((char *)Bluetooth.rx_buffer, "RUN", 3U) == 0) {
 
@@ -569,6 +615,41 @@ static void BluetoothTask(void *argument) {
                 }
                 /* No se manda ACK de vuelta -- este mensaje YA ES un ACK,
                  * ApuntadorUpdateTask lo esta esperando (ver mas abajo). */
+
+            } else if (Bluetooth.rx_count >= 4U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "CONF", 4U) == 0) {
+
+                /* $CONF<datos> -- handshake de datos de ejercicio. Vigilado
+                 * de forma GLOBAL (no solo dentro de la pantalla de
+                 * Bluetooth, BT_ESPERANDO) para que una reconexion BLE
+                 * espontanea funcione: Sensores siempre repite el handshake
+                 * completo (READY->CONF->ACKCONF) tras reconectar, y Mira
+                 * debe aceptarlo sin importar en que pantalla este parada
+                 * (14-sep-2026, antes solo se aceptaba dentro de BT_ESPERANDO,
+                 * quedaba "fantasma" si Mira ya no estaba ahi). */
+                bool conf_ok = Bt_ParseExerciseData((char *)&Bluetooth.rx_buffer[4], &g_exercise_data);
+                Bt_ResetRx(&Bluetooth);
+
+                if (conf_ok) {
+                    Inicializacion_PrintExerciseData();
+                    bt_task_send_ack("$ACKCONF\r");
+                    Screen_Bluetooth_SetLinked(true);
+                    Log_Print("BT-TASK", "CONF recibido y parseado -- conectado");
+                } else {
+                    Screen_Bluetooth_NotifyConfError();
+                    Log_Print("BT-TASK", "CONF recibido pero fallo el parseo");
+                }
+
+            } else if (Bluetooth.rx_count >= 4U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "A_SN", 4U) == 0) {
+
+                /* $A_SN<vidas> -- Sensores detecto un impacto real valido y
+                 * nos manda las vidas actuales del jugador. Solo informativo,
+                 * no se espera ni se manda ACK de vuelta. */
+                uint8_t vidas = (uint8_t)strtoul((char *)&Bluetooth.rx_buffer[4], NULL, 10);
+                g_exercise_data.lives = vidas;
+                Log_Printf("BT-TASK", "A_SN recibido -- vidas=%u", (unsigned)vidas);
+                Bt_ResetRx(&Bluetooth);
             }
             /* Agregar un caso nuevo de ACK (ej. $ACKEND) aqui mismo: otro
              * "else if" que revise s_ack_pendiente == ACK_END antes de
@@ -627,7 +708,8 @@ static void ApuntadorUpdateTask_EnviarConAck(void) {
     char msg[32];
 
     for (uint8_t intento = 0U; intento <= A_AP_MAX_REINTENTOS; intento++) {
-        if (!s_ejercicio_activo || s_dscon_en_ejercicio || s_end_admin_en_ejercicio) {
+        if (!s_ejercicio_activo || s_dscon_en_ejercicio ||
+            s_end_admin_en_ejercicio || s_end_muerte_en_ejercicio) {
             /* El ejercicio ya termino (tiempo agotado) mientras estabamos
              * a media espera/reintento de un intento anterior -- no seguir
              * mandando/reintentando fuera de Ejercicio (ej. si el usuario
@@ -657,6 +739,10 @@ static void ApuntadorUpdateTask_EnviarConAck(void) {
             }
             if (s_end_admin_en_ejercicio) {
                 Log_Print("A_AP", "Abortado -- END_S en medio de la espera del ACK");
+                return;
+            }
+            if (s_end_muerte_en_ejercicio) {
+                Log_Print("A_AP", "Abortado -- END_M en medio de la espera del ACK");
                 return;
             }
             if (!s_ejercicio_activo) {

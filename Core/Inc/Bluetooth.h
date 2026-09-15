@@ -55,6 +55,14 @@ extern "C" {
 #define BT_CMD_TEST         "AT\r"      /**< Test basico -> "00"                    */
 #define BT_CMD_VERSION      "AT I 3\r"  /**< Version FW -> "10\t3\t<version>\r00"   */
 
+/* Comando que hace que el BL654 corra su programa cargado ("Apuntador"),
+ * ya que todavia no tenemos el autorun configurado en el modulo. Se manda
+ * una sola vez, siempre, como parte de la inicializacion del modulo (ver
+ * Bt_SendRunBLE() / Inicializacion.c) -- ya no es un boton del menu
+ * (14-sep-2026). El modulo no regresa respuesta a este comando (confirmado
+ * en pruebas), asi que no se espera nada por UART. */
+#define BT_CMD_RUNBLE       "AT+RUN \"Apuntador\"\r\n"
+
 /* TODO: AT+DIR -- lista los archivos cargados en el modulo. Pendiente de
  * probar y documentar el formato de respuesta. */
 
@@ -137,6 +145,15 @@ void Bt_ResetRawDebug(Bt_Handle_t *h);
  * @param  h  Pointer to the Bluetooth handle.
  */
 BtStatus_e Bt_SendAdvertise(Bt_Handle_t *h);
+
+/**
+ * @brief  Manda BT_CMD_RUNBLE ("AT+RUN \"Apuntador\"\r\n") y resetea el rx.
+ * @param  h  Pointer to the Bluetooth handle.
+ * @note   Llamar una sola vez durante la inicializacion del modulo (ver
+ *         Inicializacion.c). No espera respuesta -- el modulo no contesta
+ *         a este comando.
+ */
+BtStatus_e Bt_SendRunBLE(Bt_Handle_t *h);
 
 /* ========================  SELF-TEST  ==================================== */
 

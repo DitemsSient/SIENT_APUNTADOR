@@ -203,6 +203,7 @@ Buffers TX/RX: 256 bytes. Handle: `Bt_Handle_t { huart, tx_buf, rx_buf, rx_count
 - `Bt_StoreByte(h)` — llamar desde ISR UART
 - `Bt_ResetRx(h)` — limpia buffer de recepción
 - `Bt_Test()` → `uint8_t` — envía `BT_CMD_TEST` (`"AT\r"`), busca `"00"` en respuesta con timeout (TestHW)
+- `Bt_SendRunBLE(h)` (14-sep-2026) — envía `BT_CMD_RUNBLE` (`"AT+RUN \"Apuntador\"\r\n"`), sin esperar respuesta (el módulo no contesta). Se llama **una sola vez**, siempre, en `Inicializacion.c` justo después de `Bt_Test()` — antes era un botón "RunBLE" en la pantalla de Bluetooth, ahora corre solo al inicializar el módulo
 
 > **Módulo real confirmado (28-ago-2026): BL654 con la app "AT Interface" de Laird/Ezurio, firmware `29.5.7.2`.**
 > Sintaxis real distinta a AT clásico: comandos terminan solo en `\r` (sin `\n`), tokens separados por **espacio** (`AT I 3\r`, no `ATI3\r`). Respuesta de éxito es `"00"` (no `"OK"`); error es `"01\t<código>"` (ej. `01\tE007` = comando no reconocido — confirmado enviando sintaxis inválida). Comandos verificados en hardware:
@@ -214,13 +215,15 @@ Buffers TX/RX: 256 bytes. Handle: `Bt_Handle_t { huart, tx_buf, rx_buf, rx_count
 > Además del "AT Interface" de arriba, el módulo corre su propio firmware de aplicación con mensajes `$...\r`:
 > - `$CON\r` → arranca advertising (nosotros lo mandamos, sin ack inmediato) · `$NoCON\r` → timeout 20s sin conexión
 > - `$ACKCON\r` (antes `$OK\r`) → alguien (Sensores) se conectó
-> - `$CONF<datos>\r` (antes `$*<datos>\r`, 7-sep-2026) → primer payload GATT tras conectar (CSV `orden,lora,equipo,alias,vidas,balas,tiempo,mac`) → respondemos `$ACKCONF\r` (antes `$ACK*DATA\r`)
+> - `$CONF<datos>\r` (antes `$*<datos>\r`, 7-sep-2026) → payload GATT con datos de ejercicio (CSV `orden,lora,equipo,alias,vidas,balas,tiempo,mac`) → respondemos `$ACKCONF\r` (antes `$ACK*DATA\r`). Vigilado GLOBALMENTE por `BluetoothTask` desde el 14-sep-2026 (antes solo dentro de `BT_ESPERANDO` en `Menu_Bluetooth.c`) — necesario porque Sensores repite el handshake completo tras cualquier reconexión BLE, sin importar en qué pantalla esté Mira parada (ver `Bt_ParseExerciseData()`, pública en `Menu_Bluetooth.c`)
 > - `$DSCON\r` → desconexión en cualquier momento → respondemos `$ACKDSCON\r` (vigilado globalmente por `BluetoothTask`, no por la pantalla de Bluetooth)
 > - `$RUN\r` → arranca el modo Ejercicio → respondemos `$ACKRUN\r` (también vigilado por `BluetoothTask`)
-> - `$END_A\r` (antes `$END\r`, 8-sep-2026) → lo mandamos nosotros cuando el Ejercicio termina por tiempo agotado (no si terminó por `$DSCON`/`$END_S`, ya no hay a quién avisarle) → secuencia de LED "colorida" (`SecuenciasLED_FinEjercicio()`)
+> - `$END_A\r` (antes `$END\r`, 8-sep-2026) → lo mandamos nosotros cuando el Ejercicio termina por tiempo agotado (no si terminó por `$DSCON`/`$END_S`/`$END_M`, ya no hay a quién avisarle o ya nos avisaron ellos) → secuencia de LED "colorida" (`SecuenciasLED_FinEjercicio()`)
+> - `$END_M\r` (Sensores→Mira, 14-sep-2026) → este jugador se quedó sin vidas, en cualquier momento durante el ejercicio → respondemos `$ACKEND_M\r` (vigilado globalmente por `BluetoothTask`, mismo patrón que `$END_S`) — si hay ejercicio activo, `ExerciseTask` lo corta: pantalla "HAS MUERTO", misma secuencia de LED "colorida" que el fin normal (`SecuenciasLED_FinEjercicio()`), regresa al menú
 > - `$END_S\r` (Sensores→Mira, 7-sep-2026) → el encargado del juego detiene el ejercicio para cualquier jugador, en cualquier momento → respondemos `$ACKEND_S\r` (vigilado globalmente por `BluetoothTask`, mismo patrón que `$DSCON`) — si hay ejercicio activo, `ExerciseTask` lo corta: pantalla "FINALIZADO"/"POR ADMIN", LED rojo x10 @400ms, +5s de espera, regresa al menú
 > - `$A_AP<balas>,<pct>\r` → lo mandamos nosotros cada 200ms si cambian las balas o la batería se mueve ≥2% (ver `ApuntadorUpdateTask` abajo)
-> - `$A_SN...\r` → **futuro, NO implementado todavía** — la PCB Sensores nos reportará cambios de vidas por ahí
+> - `$A_SN<vidas>\r` (Sensores→Mira, 14-sep-2026) → Sensores lo manda apenas detecta un impacto real válido durante el ejercicio, con las vidas actuales. Vigilado globalmente por `BluetoothTask`, actualiza `g_exercise_data.lives` directo. Sin ACK esperado (puramente informativo)
+> - `$MAC\r` (14-sep-2026) → lo mandamos nosotros al elegir la opción "MAC" en la pantalla de Bluetooth (`BT_MAIN` desconectado) → el módulo responde `$ACKMAC<mac>\r`, mostramos la MAC recibida en pantalla (`BT_MAC_MOSTRAR`, opción "Salir" → `BT_MAIN`). A diferencia de los mensajes de arriba, este NO es global — solo se procesa mientras la pantalla está parada en `BT_MAC_ESPERANDO` (consulta iniciada por el usuario, no un evento espontáneo)
 >
 > `$A_AP` SÍ espera su ACK con reintento (1.5s timeout, 2 reintentos, ver `ApuntadorUpdateTask` abajo) — el resto de los ACK arriba no esperan reintento todavía de nuestro lado (si no llegan, no pasa nada por ahora) — ver `Pendientes.md`.
 
@@ -454,8 +457,8 @@ posible entre ellas).
 | `LoggerTask` | — (bloqueante en la cola) | Siempre | Cuerpo `Log_Task()` (vive en `Logger.c`) — consume la cola del Logger y hace la transmisión USB CDC real. Ver sección `Logger`. |
 | `MenuTask` | 20 ms | Siempre, salvo pausada durante un Ejercicio | `Menu_Poll()` + `Menu_Update()` (navegación/pantallas), reporta heap libre en su primera vuelta, imprime el log diferido del gatillo |
 | `LuzMuxTask` | 20 s | Siempre | Lee TSL2571, ajusta `Mux_Laser` (potencia del láser) según luz ambiental, lee `BatGauge_Update()` y actualiza `g_exercise_data.lvBatery` |
-| `BluetoothTask` | 20 ms | Siempre | Vigila `$DSCON`/`$END_S`/`$RUN`/`$ACKA_AP` de forma global (incluso con `MenuTask` pausada), responde sus ACK, arranca/corta el Ejercicio |
-| `ExerciseTask` | — (loop corto 150 ms dentro) | Solo durante un Ejercicio — nace suspendida, la reanuda `Tareas_IniciarEjercicio()` | Cuenta regresiva 10..1, `"!INICIA!"`, alterna pantallas balas/vidas ↔ equipo/jugador cada `EXERCISE_PANTALLA_MS`, refresca balas/vidas/batería cada 1s, controla el temporizador general; termina por tiempo agotado (manda `$END\r`), por `$DSCON`, o por `$END_S` (parado por admin) — cada motivo con su propia pantalla/secuencia de LED |
+| `BluetoothTask` | 20 ms | Siempre | Vigila `$DSCON`/`$END_S`/`$RUN`/`$CONF<datos>`/`$A_SN<vidas>`/`$ACKA_AP` de forma global (incluso con `MenuTask` pausada), responde sus ACK (menos `$A_SN`), arranca/corta el Ejercicio |
+| `ExerciseTask` | — (loop corto 150 ms dentro) | Solo durante un Ejercicio — nace suspendida, la reanuda `Tareas_IniciarEjercicio()` | Cuenta regresiva 10..1, `"!INICIA!"`, alterna pantallas balas/vidas ↔ equipo/jugador cada `EXERCISE_PANTALLA_MS`, refresca balas/vidas/batería cada 1s, controla el temporizador general; termina por 4 motivos (`ExercicioFinMotivo_e`): tiempo agotado (manda `$END_A\r`), `$DSCON`, `$END_S` (parado por admin), o `$END_M` (sin vidas) — cada uno con su propia pantalla/secuencia de LED |
 | `ApuntadorUpdateTask` | 200 ms | Solo durante un Ejercicio — mismo ciclo de vida que `ExerciseTask` | Compara balas/batería contra el último valor mandado, manda `$A_AP<balas>,<pct>\r` con ACK+reintento (`ApuntadorUpdateTask_EnviarConAck()`, 1.5s timeout, 2 reintentos) |
 
 **Suspender/reanudar en vez de crear/destruir:** `ExerciseTask` y `ApuntadorUpdateTask` se crean una sola vez (`Tareas_CrearTareas()`) y nacen suspendidas — cada `$RUN` las reanuda, cada fin de ejercicio se auto-suspenden. Así se evita la sobrecarga/riesgo de `osThreadNew`/terminar tareas en caliente.
@@ -466,6 +469,7 @@ posible entre ellas).
 - `s_ejercicio_activo` — true mientras `ExerciseTask` corre un ejercicio
 - `s_dscon_en_ejercicio` — la pone `BluetoothTask` si llega `$DSCON` en medio de un ejercicio; `ExerciseTask` y `ApuntadorUpdateTask` la revisan y abortan
 - `s_end_admin_en_ejercicio` — la pone `BluetoothTask` si llega `$END_S` en medio de un ejercicio; mismo patrón que `s_dscon_en_ejercicio`, `ExerciseTask` y `ApuntadorUpdateTask` la revisan y abortan
+- `s_end_muerte_en_ejercicio` — la pone `BluetoothTask` si llega `$END_M` en medio de un ejercicio; mismo patrón, `ExerciseTask` y `ApuntadorUpdateTask` la revisan y abortan
 - `ejercicio_disparo_habilitado` (declarada en `Transmsion_Laser_IR.h`, la consulta el gatillo) — false durante la cuenta regresiva, true después de `"!INICIA!"`, false al terminar
 - `s_ack_pendiente` (`AckEstado_e`: `ACK_NINGUNO`/`ACK_A_AP`/...) — qué ACK se está esperando ahora mismo, un solo valor pendiente a la vez en todo el sistema
 - `s_menuTask_pausar`/`s_menuTask_pausada` — protocolo de pausa cooperativa de `MenuTask` (ver arriba)

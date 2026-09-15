@@ -7,12 +7,17 @@
  *          - $CON\r          → arranca advertising (sin ack inmediato)
  *          - $NoCON\r        → pasaron 20s sin conexion, hay que reenviar $CON
  *          - $ACKCON\r       → alguien (Sensores) se conecto (antes $OK\r)
- *          - $CONF<datos>\r  → primer dato GATT tras conectar: datos de
- *                              juego separados por coma (ver bt_parse_
- *                              exercise_data), "CONF" (de "configuracion")
- *                              marca que hay que parsear y guardar en
- *                              g_exercise_data. Responde $ACKCONF\r si el
- *                              parseo fue exitoso (antes era '*'/$ACK*DATA).
+ *          - $CONF<datos>\r  → datos de juego separados por coma (ver
+ *                              Bt_ParseExerciseData()), "CONF" (de
+ *                              "configuracion"). Responde $ACKCONF\r si el
+ *                              parseo fue exitoso. Vigilado de forma GLOBAL
+ *                              en BluetoothTask (Tareas_Interrupciones.c,
+ *                              14-sep-2026), no aqui -- necesario porque
+ *                              Sensores puede reenviar el handshake completo
+ *                              tras una reconexion BLE espontanea, en
+ *                              cualquier pantalla, no solo BT_ESPERANDO.
+ *                              Esta pantalla solo escucha el resultado via
+ *                              Screen_Bluetooth_SetLinked()/NotifyConfError().
  *          - $<dato>\r       → cualquier dato posterior (fuera de este flujo)
  *          - $DSCON\r        → desconexion en cualquier momento (manejado
  *                              de forma global en BluetoothTask, no aqui)
@@ -42,15 +47,20 @@
  *          ┌────┴────┐
  *          ▼         ▼
  *     BT_ESPERANDO  BT_SPLASH_ERR
- *     Espera $CONF<datos>\r, parsea y responde $ACKCONF\r
+ *     Espera a que BluetoothTask marque s_bt_linked (via $CONF<datos>\r global)
  *          │
  *          ▼
  *     BT_SPLASH_OK
  *     Conectado (3 s) → BT_MAIN
  *
+ *          NOTA (14-sep-2026): s_bt_linked tambien puede volverse true fuera
+ *          de este flujo (una reconexion BLE espontanea mientras Mira esta
+ *          en cualquier otra pantalla) -- BT_MAIN ya lo refleja solo
+ *          (`if (s_bt_linked)`), sin necesidad de pasar por BT_ESPERANDO.
+ *
  * @date    June 26, 2026
  * @author  César Pérez
- * @version 6.0.0
+ * @version 7.0.0
  */
 
 #include "Menu/Menu_Screens.h"
@@ -68,13 +78,30 @@ extern Bt_Handle_t Bluetooth;
 
 /* ========================  STATIC STATE  ================================== */
 
-static bool     s_bt_linked  = false;
+static volatile bool s_bt_linked = false;
 static uint32_t s_led_tick   = 0U;
 static bool     s_led_on     = false;
+
+/* Banderas que BluetoothTask (Tareas_Interrupciones.c) usa para avisarle a
+ * la pantalla de Bluetooth (si es que esta parada en BT_ESPERANDO) que un
+ * $CONF<datos> ya se resolvio -- ver Screen_Bluetooth_SetLinked() /
+ * Screen_Bluetooth_NotifyConfError() y su nota en el header. */
+static volatile bool s_conf_fallo = false;
 
 void Screen_Bluetooth_ResetLink(void)
 {
     s_bt_linked = false;
+}
+
+void Screen_Bluetooth_SetLinked(bool linked)
+{
+    s_bt_linked      = linked;
+    hmenu.bt_connected = linked;
+}
+
+void Screen_Bluetooth_NotifyConfError(void)
+{
+    s_conf_fallo = true;
 }
 
 /**
@@ -82,7 +109,7 @@ void Screen_Bluetooth_ResetLink(void)
  * @param  payload  Texto a partir de despues de "CONF" (sin el '$' ni el '\r').
  * @return true si los 8 campos se parsearon correctamente.
  */
-static bool bt_parse_exercise_data(const char *payload, ExerciseGameData_t *out)
+bool Bt_ParseExerciseData(const char *payload, ExerciseGameData_t *out)
 {
     char buf[BT_RX_BUFFER_SIZE];
     strncpy(buf, payload, sizeof(buf) - 1U);
@@ -134,31 +161,23 @@ static bool bt_parse_exercise_data(const char *payload, ExerciseGameData_t *out)
 #define BT_MAC_TIMEOUT_MS   20000U /**< Espera del $1<MAC>\r tras el $OK\r
                                         (handshake BLE + GATT puede tardar) */
 
-/* Comando que hace que el BL654 corra su programa cargado ("Apuntador"),
- * ya que todavia no tenemos el autorun configurado en el modulo. */
-#define BT_CMD_RUNBLE       "AT+RUN \"Apuntador\"\r\n"
+#define BT_MACQUERY_TIMEOUT_MS   6000U  /**< Espera de $ACKMAC<mac>\r tras $MAC\r */
+#define BT_MACQUERY_BUF_LEN        24U  /**< Suficiente para una MAC en texto     */
+
+/* Buffer donde queda el texto de la MAC recibida (o vacio si fallo/timeout). */
+static char s_mac_query[BT_MACQUERY_BUF_LEN] = { 0 };
 
 /**
- * @brief  Manda BT_CMD_RUNBLE al BL654 y muestra "Cod BLE Corriendo" 2s.
- * @note   El comando hace que el modulo corra el programa "Apuntador" ya
- *         cargado, sin necesidad de JTAG (todavia no hay autorun). El
- *         modulo no regresa respuesta a este comando (confirmado en
- *         pruebas), asi que no se espera nada por UART.
+ * @brief  Manda "$MAC\r" y resetea el rx -- arranca la consulta.
+ * @note   El modulo responde "$ACKMAC<mac>\r"; se procesa en BT_MAC_ESPERANDO.
  */
-static void bt_send_runble(void)
+static void bt_mac_query_start(void)
 {
-    static const uint8_t cmd[] = BT_CMD_RUNBLE;
+    static const uint8_t cmd[] = "$MAC\r";
 
+    s_mac_query[0] = '\0';
     Bt_ResetRx(&Bluetooth);
     Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U);
-
-    ssd1306_clearDisplay();
-    ssd1306_setTextSize(1U);
-    ssd1306_setTextColor(WHITE);
-    ssd1306_printCentered("Cod BLE",   10, &Font5x7);
-    ssd1306_printCentered("Corriendo", 20, &Font5x7);
-    ssd1306_display();
-    HAL_Delay(2000U);
 }
 
 /* ========================  DRAW  ========================================= */
@@ -188,7 +207,7 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                 ssd1306_setCursor(0, y);
                 ssd1306_print("> Salir", &Font5x7);
             } else {
-                const char *opts[] = { "Anunciar", "RunBLE", "Salir" };
+                const char *opts[] = { "Anunciar", "MAC", "Salir" };
                 for (uint8_t i = 0U; i < 3U; i++) {
                     int16_t y = (int16_t)(8 + i * MENU_LINE_H);
                     ssd1306_setCursor(0, y);
@@ -261,26 +280,19 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             ssd1306_printCentered(". . .",    18, &Font5x7);
             ssd1306_display();
 
-            /* LED se queda fijo en azul (ya no parpadea) desde que llego el $OK\r */
-
-            if (Bluetooth.rx_ready) {
-                if (Bluetooth.rx_count >= 4U &&
-                    strncmp((char *)Bluetooth.rx_buffer, "CONF", 4U) == 0 &&
-                    bt_parse_exercise_data((char *)&Bluetooth.rx_buffer[4], &g_exercise_data)) {
-                    Inicializacion_PrintExerciseData();
-
-                    static const uint8_t ack[] = "$ACKCONF\r";
-                    Bt_Transmit(&Bluetooth, ack, sizeof(ack) - 1U);
-
-                    SecuenciasLED_Apagar();
-                    s_bt_linked     = true;
-                    h->bt_connected = true;
-                    h->sub_state    = (uint8_t)BT_SPLASH_OK;
-                } else {
-                    SecuenciasLED_Apagar();
-                    h->sub_state = (uint8_t)BT_SPLASH_ERR;
-                }
-                Bt_ResetRx(&Bluetooth);
+            /* LED se queda fijo en azul (ya no parpadea) desde que llego el $OK\r.
+             * El $CONF<datos> en si YA NO se parsea aqui -- BluetoothTask lo
+             * vigila de forma global (Tareas_Interrupciones.c) para que una
+             * reconexion espontanea funcione sin importar la pantalla. Esta
+             * pantalla solo espera a que s_bt_linked/s_conf_fallo cambien. */
+            if (s_bt_linked) {
+                SecuenciasLED_Apagar();
+                h->sub_state    = (uint8_t)BT_SPLASH_OK;
+                h->splash_tick  = HAL_GetTick();
+            } else if (s_conf_fallo) {
+                s_conf_fallo = false;
+                SecuenciasLED_Apagar();
+                h->sub_state   = (uint8_t)BT_SPLASH_ERR;
                 h->splash_tick = HAL_GetTick();
             } else if ((HAL_GetTick() - h->splash_tick) >= BT_MAC_TIMEOUT_MS) {
                 SecuenciasLED_Apagar();
@@ -321,6 +333,51 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
             h->needs_redraw = true;
             break;
 
+        case BT_MAC_ESPERANDO:
+            ssd1306_clearDisplay();
+            ssd1306_setTextSize(1U);
+            ssd1306_setTextColor(WHITE);
+            ssd1306_printCentered("Consultando", 6, &Font5x7);
+            ssd1306_printCentered("MAC . . .", 18, &Font5x7);
+            ssd1306_display();
+
+            if (Bluetooth.rx_ready) {
+                if (Bluetooth.rx_count >= 6U &&
+                    strncmp((char *)Bluetooth.rx_buffer, "ACKMAC", 6U) == 0) {
+
+                    uint16_t len = (uint16_t)(Bluetooth.rx_count - 6U);
+                    if (len >= sizeof(s_mac_query)) {
+                        len = (uint16_t)(sizeof(s_mac_query) - 1U);
+                    }
+                    memcpy(s_mac_query, &Bluetooth.rx_buffer[6], len);
+                    s_mac_query[len] = '\0';
+                    Log_Printf("BT", "ACKMAC recibido -- mac=%s", s_mac_query);
+                } else {
+                    Log_Print("BT", "Respuesta inesperada esperando ACKMAC");
+                }
+                Bt_ResetRx(&Bluetooth);
+                h->sub_state    = (uint8_t)BT_MAC_MOSTRAR;
+                h->needs_redraw = true;
+            } else if ((HAL_GetTick() - h->splash_tick) >= BT_MACQUERY_TIMEOUT_MS) {
+                Log_Print("BT", "Timeout esperando ACKMAC");
+                h->sub_state    = (uint8_t)BT_MAC_MOSTRAR;
+            }
+            h->needs_redraw = true;
+            break;
+
+        case BT_MAC_MOSTRAR:
+            ssd1306_clearDisplay();
+            ssd1306_setTextSize(1U);
+            ssd1306_setTextColor(WHITE);
+
+            ssd1306_setCursor(0, 6);
+            ssd1306_print(s_mac_query[0] != '\0' ? s_mac_query : "Sin respuesta", &Font5x7);
+
+            ssd1306_setCursor(0, 25);
+            ssd1306_print("> Salir", &Font4x6);
+            ssd1306_display();
+            break;
+
         default:
             break;
     }
@@ -330,6 +387,16 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
 
 void Screen_Bluetooth_OnButton(Menu_Handle_t *h, MenuButton_e btn)
 {
+    if (h->sub_state == (uint8_t)BT_MAC_MOSTRAR) {
+        /* Unica opcion: Salir -> de vuelta a BT_MAIN */
+        if (btn == BTN_ENTER) {
+            h->sub_state    = (uint8_t)BT_MAIN;
+            h->selected     = 0U;
+            h->needs_redraw = true;
+        }
+        return;
+    }
+
     if (h->sub_state != (uint8_t)BT_MAIN) {
         return;
     }
@@ -342,7 +409,7 @@ void Screen_Bluetooth_OnButton(Menu_Handle_t *h, MenuButton_e btn)
         return;
     }
 
-    /* Disconnected: Anunciar / RunBLE / Salir */
+    /* Disconnected: Anunciar / MAC / Salir */
     if (btn == BTN_NAVIGATE) {
         h->selected++;
         if (h->selected >= 3U) {
@@ -354,7 +421,9 @@ void Screen_Bluetooth_OnButton(Menu_Handle_t *h, MenuButton_e btn)
         if (h->selected == 2U) {
             Menu_GoTo(h, SCREEN_MAIN_MENU);
         } else if (h->selected == 1U) {
-            bt_send_runble();
+            bt_mac_query_start();
+            h->sub_state    = (uint8_t)BT_MAC_ESPERANDO;
+            h->splash_tick  = HAL_GetTick();
             h->needs_redraw = true;
         } else {
             h->sub_state    = (uint8_t)BT_INICIANDO;

@@ -143,6 +143,15 @@ BtStatus_e Bt_SendAdvertise(Bt_Handle_t *h)
     return Bt_Transmit(h, cmd, sizeof(cmd) - 1U);
 }
 
+BtStatus_e Bt_SendRunBLE(Bt_Handle_t *h)
+{
+    if (h == NULL) { return BT_ERR_PARAM; }
+
+    static const uint8_t cmd[] = BT_CMD_RUNBLE;
+    Bt_ResetRx(h);
+    return Bt_Transmit(h, cmd, sizeof(cmd) - 1U);
+}
+
 /* ========================  SELF-TEST  ==================================== */
 
 uint8_t Bt_Test(void)
