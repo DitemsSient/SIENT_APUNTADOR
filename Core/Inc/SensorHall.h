@@ -6,7 +6,9 @@
  *          plain GPIO input — no ADC involved. The comparator outputs a clean
  *          HIGH/LOW level instead of a raw analog reading.
  *          CubeMX configuration (this board):
- *          - PA8 ("GATILLO") as GPIO_Input, no pull (comparator drives the line).
+ *          - PA4 ("GATILLO") como entrada digital (interrupcion EXTI4 para el
+ *            disparo real, ver HAL_GPIO_EXTI_Callback en Transmision_Laser_IR.c).
+ *            Antes era PA8 (tarjeta vieja) -- se movio el 30-sep-2026.
  *
  * @date    March 27, 2026
  * @author  César Pérez
@@ -24,7 +26,7 @@
 /* GPIO port/pin connected to the Hall sensor comparator output (DO) */
 
 #define HALL_GPIO_PORT           GPIOA
-#define HALL_GPIO_PIN            GPIO_PIN_8
+#define HALL_GPIO_PIN            GPIO_PIN_4
 
 /* ================================  API  =================================== */
 

@@ -11,6 +11,7 @@
 #include "main.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 /* ===========================================================================
  *  BOOTLOADER + USB CDC + LOGGER  (siempre activos, ver Inicializacion.h)
@@ -87,13 +88,18 @@ Bt_Handle_t Bluetooth;
 #endif
 
 /* ===========================================================================
- *  IMU (LSM6DSO32TR / chip real LSM6DS3)
+ *  IMU (LSM6DSO32TR)
  * ===========================================================================
  */
 #if INIT_IMU_ENABLE
 #include "LSM6DSO32TR.h"
 LSM6DSO32TR_t Imu;
 LSM_Data_t Imu_UltimaLectura;
+/* Valor crudo de WHO_AM_I leido en el arranque (diagnostico, 30-sep-2026)
+ * -- se lee siempre, exista o no exista match contra LSM_WHO_AM_I_VAL, para
+ * saber exactamente que esta contestando el chip aunque el Init() normal
+ * falle. Solo se manda al Logger. */
+static uint8_t s_imu_who_am_i = 0U;
 #endif
 
 /* ===========================================================================
@@ -282,6 +288,26 @@ void Inicializacion_Run(void) {
     Log_NewLine();
     HAL_Delay(500U);
 
+    /* Arcoiris de diagnostico -- confirma visualmente que los 3 canales del
+     * LED RGB (y sus 3 patitas) siguen vivos antes de seguir con el resto
+     * de la inicializacion. Util para detectar una pata rota/sin soldar de
+     * un vistazo rapido, sin tener que entrar al Test HW.
+     * Patron propio (no el RGB_PATTERN_RAINBOW generico de LedRGB.h) -- mas
+     * lento (700ms/paso) y con Azul justo antes de Rojo, para confirmar a
+     * simple vista que el canal rojo si prende (30-sep-2026). */
+    static const RGBStep_t s_patron_arcoiris_diag[] = {
+        { RGB_BLUE,    700U },
+        { RGB_RED,     700U },
+        { RGB_YELLOW,  700U },
+        { RGB_GREEN,   700U },
+        { RGB_CYAN,    700U },
+        { RGB_MAGENTA, 700U },
+    };
+    Log_Print("LED", "Arcoiris de diagnostico...");
+    LedRGB_PlayPattern(s_patron_arcoiris_diag, RGB_PATTERN_LEN(s_patron_arcoiris_diag));
+    Log_NewLine();
+    HAL_Delay(500U);
+
     Inicializacion_ScanI2C();
     Log_NewLine();
     HAL_Delay(500U);
@@ -335,6 +361,14 @@ void Inicializacion_Run(void) {
 
 #if INIT_IMU_ENABLE
     Log_Print("IMU", "Inicializando IMU...");
+
+    /* Lectura cruda del WHO_AM_I, independiente de si el Init() de abajo
+     * hace match o no -- asi sabemos exactamente que esta contestando el
+     * chip real, sin adivinar (30-sep-2026). Solo Logger, no LCD. */
+    (void)LSM6DSO32TR_WhoAmI(&Imu, &s_imu_who_am_i);
+    Log_Printf("IMU", "WHO_AM_I leido = 0x%02X (se espera 0x%02X)",
+               s_imu_who_am_i, LSM_WHO_AM_I_VAL);
+
     if (LSM6DSO32TR_Init(&Imu) == LSM_OK) {
         LSM6DSO32TR_ReadAll(&Imu, &Imu_UltimaLectura);
         Log_Printf("IMU", "accel(g)=%.2f,%.2f,%.2f gyro(dps)=%.2f,%.2f,%.2f",
@@ -350,6 +384,17 @@ void Inicializacion_Run(void) {
 
 #if INIT_MAGNETOMETRO_ENABLE
     Log_Print("MAG", "Inicializando magnetometro...");
+
+    /* Lectura cruda del Product ID, independiente de si el Init() de abajo
+     * hace match o no -- mismo patron que el WHO_AM_I del IMU arriba
+     * (30-sep-2026). Solo Logger, no LCD. */
+    {
+        uint8_t mag_product_id = 0U;
+        (void)MMC5983MA_WhoAmI(&mag_product_id);
+        Log_Printf("MAG", "Product ID leido = 0x%02X (se espera 0x%02X)",
+                   mag_product_id, MMC_PRODUCT_ID);
+    }
+
     if (MMC5983MA_Init() == MMC_OK) {
         HAL_Delay(150U); /* espera la primera conversion (ODR 10Hz ~100ms) */
         MMC5983MA_ReadAll(&Magnetometro_UltimaLectura);
@@ -442,6 +487,7 @@ void Inicializacion_Run(void) {
     Log_Print("LCD", "Inicializando display OLED...");
     ssd1306_begin(SSD1306_SWITCHCAPVCC, 0x3CU);
     Diagnostico.display = true;
+
     ssd1306_clearDisplay();
     ssd1306_drawBitmap(0, 0, bitmap_Logo_SIENT, 64, 32, WHITE);
     ssd1306_display();

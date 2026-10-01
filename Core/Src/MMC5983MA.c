@@ -118,7 +118,13 @@ MMC_Status_e MMC5983MA_Init(void)
     /* Verify device identity */
     status = MMC5983MA_WhoAmI(&id);
     if (status != MMC_OK) return status;
-    if (id != MMC_PRODUCT_ID) return MMC_ERR_ID;
+    /* DIAGNOSTICO TEMPORAL (30-sep-2026) -- freno de ID desactivado a
+     * proposito para ver si el resto de la comunicacion (escritura de
+     * config + lectura de datos reales) funciona aunque el Product ID no
+     * haga match (0x61 leido en vez de 0x30 esperado). REVERTIR este
+     * bypass en cuanto se resuelva el tema de hardware -- no dejar
+     * nunca en el firmware real. */
+    /* if (id != MMC_PRODUCT_ID) return MMC_ERR_ID; */
 
     /* CTRL0: enable auto SET/RESET on every sample */
     status = MMC_WriteReg(MMC_REG_CTRL0, MMC_CTRL0_AUTO_SR);

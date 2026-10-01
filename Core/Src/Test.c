@@ -169,7 +169,7 @@ void Test_Flash(void) {
 }
 
 /* ===========================================================================
- *  PRUEBA 9 — LSM6DSO32TR (IMU accel+gyro, chip real LSM6DS3)
+ *  PRUEBA 9 — LSM6DSO32TR (IMU accel+gyro)
  * ===========================================================================
  */
 #include "LSM6DSO32TR.h"

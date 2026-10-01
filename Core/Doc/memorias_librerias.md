@@ -261,14 +261,14 @@ como prescaler para testing.
 
 ## LSM6DSO32TR
 
-Driver para el IMU de 6 ejes via I2C. **El nombre del archivo/API dice "LSM6DSO32TR" pero el chip real soldado en esta tarjeta es un LSM6DS3** (confirmado por `WHO_AM_I = 0x69`, no `0x6C`) — el mapa de registros usado es compatible entre ambos, así que el driver funciona igual, solo cambió la constante de `WHO_AM_I` esperado. Entrega los seis ejes en dos transacciones burst de 6 bytes cada una, aplica calibración de bias del giroscopio y cuenta con recuperación automática por SW reset ante errores I2C. Soporta modo power-down (ODR=0) para bajo consumo.
+Driver para el IMU de 6 ejes via I2C. **Tarjeta nueva (30-sep-2026): ya trae el chip correcto, LSM6DSO32TR, `WHO_AM_I = 0x6C`.** La tarjeta vieja traía soldado por error un LSM6DS3 (`WHO_AM_I = 0x69`) — pin-compatible y con el mismo mapa de registros, así que el driver no necesitó más cambio que la constante de `WHO_AM_I` esperado durante ese tiempo. Entrega los seis ejes en dos transacciones burst de 6 bytes cada una, aplica calibración de bias del giroscopio y cuenta con recuperación automática por SW reset ante errores I2C. Soporta modo power-down (ODR=0) para bajo consumo.
 
 **Archivo:** `LSM6DSO32TR.h` / `LSM6DSO32TR.c` · **Versión:** 1.1.0  
-**Componente:** IMU 6 ejes ST LSM6DS3 (accel + gyro) — nombre de archivo histórico "LSM6DSO32TR"  
+**Componente:** IMU 6 ejes ST LSM6DSO32TR (accel + gyro)  
 **Bus:** I2C1 (`hi2c1`) · **Dirección:** `0x6A` (SA0=GND)
 
 Configuración fija: accel ±16 g / gyro ±500 dps, ODR 104 Hz HP, BDU habilitado.  
-WHO_AM_I esperado: `0x69` (LSM6DS3).
+WHO_AM_I esperado: `0x6C` (LSM6DSO32TR; en la tarjeta vieja, con el LSM6DS3 soldado por error, era `0x69`).
 
 Handle: `LSM6DSO32TR_t { cal, initialized, consecutive_errors, total_recoveries }`.  
 Datos: `LSM_Data_t { ax/ay/az_raw, gx/gy/gz_raw, ax/ay/az_g, gx/gy/gz_dps, temp_c }`.  
@@ -279,7 +279,7 @@ Bajo consumo: `PowerDown` escribe ODR=0 en CTRL1_XL y CTRL2_G; `PowerOn` restaur
 
 **API:**
 - `LSM6DSO32TR_Init(dev)` — SW reset + WHO_AM_I + configura accel/gyro/BDU
-- `LSM6DSO32TR_WhoAmI(dev, &id)` — retorna 0x69
+- `LSM6DSO32TR_WhoAmI(dev, &id)` — retorna 0x6C
 - `LSM6DSO32TR_CalibrateGyroBias(dev)` — 200 muestras × 10 ms ≈ 2 s en reposo
 - `LSM6DSO32TR_ReadAll(dev, &out)` — burst gyro + burst accel + temperatura, bias corregido
 - `LSM6DSO32TR_Recover(dev)` — SW reset + reconfig, preserva cal

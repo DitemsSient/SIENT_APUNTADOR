@@ -1,12 +1,17 @@
 /**
  * @file    LSM6DSO32TR.h
- * @brief   6-axis IMU driver over I2C on STM32L433 — chip real: LSM6DS3
- *          (WHO_AM_I 0x69, confirmado en la tarjeta física), no LSM6DSO32TR.
+ * @brief   6-axis IMU driver over I2C on STM32L433 — chip real: LSM6DSO32TR
+ *          (WHO_AM_I 0x6C -- valor original del proyecto, confirmado en el
+ *          commit de migracion inicial y en IMU+Magne_Documentacion.md).
  *
- * @details El mapa de registros usado aquí (CTRL1_XL, CTRL2_G, CTRL3_C,
- *          OUTX_L_G, OUTX_L_XL, WHO_AM_I) y la codificación de bits son
- *          compatibles entre LSM6DS3 y LSM6DSO32TR, así que el driver se
- *          mantiene sin cambios salvo el valor esperado de WHO_AM_I.
+ * @details La tarjeta vieja traía soldado por error un LSM6DS3 (WHO_AM_I
+ *          0x69) en vez del LSM6DSO32TR real -- pin-compatible y con el
+ *          mismo mapa de registros (CTRL1_XL, CTRL2_G, CTRL3_C, OUTX_L_G,
+ *          OUTX_L_XL, WHO_AM_I), asi que el driver no necesito mas cambio
+ *          que el valor esperado de WHO_AM_I. La tarjeta nueva ya trae el
+ *          chip correcto, LSM6DSO32TR, WHO_AM_I real = 0x6C (30-sep-2026:
+ *          se habia puesto 0x6B por error, por un dato de segunda mano mal
+ *          transcrito -- corregido de vuelta a 0x6C).
  *
  *          Configura el acelerómetro y giroscopio con un ODR fijo de 104 Hz
  *          (high-performance, low-noise), entrega los seis ejes en un burst
@@ -51,7 +56,7 @@
 
 /* Register map (relevant subset) */
 
-#define LSM_REG_WHO_AM_I        0x0FU   /**< Device ID, expected 0x69 (LSM6DS3) */
+#define LSM_REG_WHO_AM_I        0x0FU   /**< Device ID, expected 0x6C (LSM6DSO32TR) */
 #define LSM_REG_CTRL1_XL        0x10U   /**< Accelerometer control           */
 #define LSM_REG_CTRL2_G         0x11U   /**< Gyroscope control               */
 #define LSM_REG_CTRL3_C         0x12U   /**< General control (SW reset, BDU) */
@@ -77,7 +82,7 @@
 
 /* Device identification */
 
-#define LSM_WHO_AM_I_VAL        0x69U   /**< LSM6DS3 (chip real en esta tarjeta) */
+#define LSM_WHO_AM_I_VAL        0x6CU   /**< LSM6DSO32TR (valor original del proyecto -- ver commit de migracion) */
 
 /* Sensitivity constants */
 

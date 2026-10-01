@@ -25,8 +25,11 @@
  *               voltage that appears when the pin stays in AF mode with CCR = 0.
  *
  * TIM2 keeps running continuously; only the pin's MODER field is toggled.
- * ARR is shared with the buzzer (also on TIM2, CH2) — see the ARR
- * re-enforcement in Tx_IR_Init()/Tx_IR_SendFrame()/Tx_IR_SendCalibration().
+ * Hasta la tarjeta vieja, el ARR se compartia con el Buzzer (tambien en
+ * TIM2, CH2) -- desde el 30-sep-2026 el Buzzer vive en TIM15 CH2/PA3, timer
+ * propio, TIM2 ya es exclusivo del laser. El re-enforce de ARR en
+ * Tx_IR_Init()/Tx_IR_SendFrame()/Tx_IR_SendCalibration() se deja de todos
+ * modos como red de seguridad, no hace daño y ya no deberia hacer falta.
  */
 
 /**
@@ -128,8 +131,8 @@ static void Tx_IR_SendByte(uint8_t data) {
  */
 void Tx_IR_Init(void) {
     Tx_IR_Pin_SetLow();
-    /* ARR is shared with the buzzer on the same timer (TIM2) — enforce the
-     * 40 kHz carrier period here in case the buzzer left it at a note's ARR. */
+    /* TIM2 ya es exclusivo del laser (Buzzer se movio a TIM15, 30-sep-2026) --
+     * se deja el re-enforce del ARR de todos modos, red de seguridad barata. */
     __HAL_TIM_SET_AUTORELOAD(&Tx_IR_TIM_HANDLE, 24U);
     __HAL_TIM_SET_COMPARE(&Tx_IR_TIM_HANDLE, Tx_IR_TIM_CHANNEL, 0U);
 }
@@ -144,8 +147,8 @@ HAL_StatusTypeDef Tx_IR_SendFrame(const uint8_t *pData, uint8_t len) {
         return HAL_ERROR;
     }
 
-    /* ARR is shared with the buzzer on TIM2 — re-enforce the carrier period
-     * in case a melody played since the last transmission. */
+    /* TIM2 ya es exclusivo del laser (ver Tx_IR_Init) -- re-enforce por las
+     * dudas, ya no comparte ARR con el Buzzer. */
     __HAL_TIM_SET_AUTORELOAD(&Tx_IR_TIM_HANDLE, 24U);
 
     uint8_t checksum = Tx_IR_ComputeChecksum(pData, len);
@@ -174,8 +177,8 @@ void Tx_IR_SendCalibration(void) {
     uint8_t b0 = (uint8_t)((LASER_CAL_CODE >> 8U) & 0xFFU);  /* 0xAA */
     uint8_t b1 = (uint8_t)(LASER_CAL_CODE & 0xFFU);           /* 0x55 */
 
-    /* ARR is shared with the buzzer on TIM2 — re-enforce the carrier period
-     * in case a melody played since the last transmission. */
+    /* TIM2 ya es exclusivo del laser (ver Tx_IR_Init) -- re-enforce por las
+     * dudas, ya no comparte ARR con el Buzzer. */
     __HAL_TIM_SET_AUTORELOAD(&Tx_IR_TIM_HANDLE, 24U);
 
     Tx_IR_SendSymbol(Tx_IR_SYNC_US);

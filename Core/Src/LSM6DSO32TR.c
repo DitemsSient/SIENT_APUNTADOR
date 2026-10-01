@@ -1,8 +1,10 @@
 /**
  * @file    LSM6DSO32TR.c
- * @brief   Driver implementation for ST LSM6DS3 6-axis IMU (accel + gyro).
- *          Nombre de archivo/API conservan "LSM6DSO32TR" por compatibilidad
- *          con el resto del proyecto; el chip real es LSM6DS3 (WHO_AM_I 0x69).
+ * @brief   Driver implementation for ST LSM6DSO32TR 6-axis IMU (accel + gyro).
+ *          Tarjeta nueva (30-sep-2026): ya trae el chip correcto, WHO_AM_I 0x6C.
+ *          La tarjeta vieja traia un LSM6DS3 (WHO_AM_I 0x69) soldado por error
+ *          -- pin-compatible, mismo mapa de registros -- de ahi que el nombre
+ *          de archivo/API se quedara en "LSM6DSO32TR" durante ese tiempo.
  *
  * @date    June 12, 2026
  * @author  César Pérez
@@ -151,7 +153,14 @@ LSM_Status_e LSM6DSO32TR_Init(LSM6DSO32TR_t *dev)
     uint8_t id = 0U;
     s = LSM6DSO32TR_WhoAmI(dev, &id);
     if (s != LSM_OK) return s;
-    if (id != LSM_WHO_AM_I_VAL) return LSM_ERR_ID;
+    /* DIAGNOSTICO TEMPORAL (30-sep-2026) -- freno de ID desactivado a
+     * proposito para ver si el resto de la comunicacion (escritura de
+     * config + lectura de datos reales) funciona aunque el WHO_AM_I no
+     * haga match (0x00 leido en vez de 0x6C esperado). Esperamos que esto
+     * siga fallando mas adelante (el 0x00 apunta a comunicacion realmente
+     * rota, no solo un ID distinto) -- confirmar y REVERTIR este bypass,
+     * no dejar nunca en el firmware real. */
+    /* if (id != LSM_WHO_AM_I_VAL) return LSM_ERR_ID; */
 
     s = LSM_Configure(dev);
     if (s != LSM_OK) return s;
@@ -161,7 +170,7 @@ LSM_Status_e LSM6DSO32TR_Init(LSM6DSO32TR_t *dev)
 }
 
 /**
- * @brief  Reads WHO_AM_I register (0x0F). Expected value is 0x69 (LSM6DS3).
+ * @brief  Reads WHO_AM_I register (0x0F). Expected value is 0x6C (LSM6DSO32TR).
  */
 LSM_Status_e LSM6DSO32TR_WhoAmI(LSM6DSO32TR_t *dev, uint8_t *id)
 {

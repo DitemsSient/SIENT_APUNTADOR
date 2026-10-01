@@ -3,10 +3,19 @@
  * @brief   Driver for passive buzzer via PWM on STM32F4xx.
  *
  * @details Controls a passive buzzer using a general-purpose timer's PWM channel.
- *          CubeMX configuration:
- *          - Timer (e.g., TIM4) in PWM Generation mode, output on the buzzer pin.
- *          - Set BUZZER_TIMER_CLK to APB1_clock / (prescaler + 1).
- *            Example: 90 MHz / (89 + 1) = 1 000 000 Hz.
+ *          CubeMX configuration (tarjeta nueva, 30-sep-2026):
+ *          - TIM15 CH2, pin PA3, en modo PWM Generation. Timer propio, YA NO
+ *            comparte ARR con el laser IR (ese sigue en TIM2 CH3/PA2) -- antes
+ *            el Buzzer vivia en TIM2 CH2/PB3 y romper el ARR del laser era
+ *            justo el bug que forzo este cambio de hardware (ver Pendientes.md).
+ *          - TIM15 esta en APB2, igual que TIM2 en APB1 ambos corren a
+ *            80 MHz de reloj de timer en este proyecto (RCC.APB2TimFreq_Value),
+ *            asi que el mismo Prescaler=79 usado en TIM2 aplica aqui tambien
+ *            para llegar a 1 000 000 Hz. CONFIRMAR en CubeMX que TIM15.Prescaler
+ *            quede en 79 -- al momento de este cambio el .ioc todavia no lo
+ *            traia seteado explicitamente.
+ *          - Set BUZZER_TIMER_CLK to APB2_clock_timer / (prescaler + 1).
+ *            80 000 000 / (79 + 1) = 1 000 000 Hz.
  *
  * @date    March 27, 2026
  * @author  César Pérez
@@ -22,7 +31,7 @@
 
 /* Timer and PWM channel assigned to the buzzer */
 
-#define BUZZER_TIMER            (&htim2)
+#define BUZZER_TIMER            (&htim15)
 #define BUZZER_CHANNEL          TIM_CHANNEL_2
 
 /**

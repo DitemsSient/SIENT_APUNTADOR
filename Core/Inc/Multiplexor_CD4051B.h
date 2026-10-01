@@ -6,6 +6,8 @@
  *          Channel selection is performed via three digital GPIO pins (A, B, C)
  *          that form a 3-bit binary code. Configure MUX_PIN_x_PORT/PIN macros
  *          to match the GPIO outputs assigned in CubeMX.
+ *          Tarjeta nueva (30-sep-2026): B se movio de PA4 a PA8, C se movio
+ *          de PA3 a PC13 (PA4 ahora es GATILLO, PA3 ahora es Buzzer/TIM15_CH2).
  *
  * @date    March 06, 2026
  * @author  César Pérez
@@ -31,10 +33,10 @@ extern "C" {
 #define MUX_PIN_A_PIN       GPIO_PIN_7      /**< Selection pin A              */
 
 #define MUX_PIN_B_PORT      GPIOA           /**< Selection pin B port (bit 1) */
-#define MUX_PIN_B_PIN       GPIO_PIN_4      /**< Selection pin B              */
+#define MUX_PIN_B_PIN       GPIO_PIN_8      /**< Selection pin B              */
 
-#define MUX_PIN_C_PORT      GPIOA           /**< Selection pin C port (bit 2) */
-#define MUX_PIN_C_PIN       GPIO_PIN_3      /**< Selection pin C              */
+#define MUX_PIN_C_PORT      GPIOC           /**< Selection pin C port (bit 2) */
+#define MUX_PIN_C_PIN       GPIO_PIN_13     /**< Selection pin C              */
 
 /* ========================  ENUMERATIONS  ================================== */
 

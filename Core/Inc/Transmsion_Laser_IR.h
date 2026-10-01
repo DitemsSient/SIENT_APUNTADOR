@@ -8,9 +8,11 @@
  *          by CubeMX before calling Tx_IR_Init().
  *          CubeMX configuration (this board):
  *          - TIM2 CH3 in PWM Generation mode, Prescaler=79, ARR=24, CCR=12
- *            for 50 % duty at 40 kHz. Output pin: PA2 ("TX_LASER").
- *            ARR is shared with the buzzer (TIM2 CH2) — this driver
- *            re-enforces ARR=24 before every transmission.
+ *            for 50 % duty at 40 kHz. Output pin: PA2 ("TX_LASER"). Timer
+ *            exclusivo del laser desde el 30-sep-2026 (antes compartia ARR
+ *            con el Buzzer, tambien en TIM2 CH2 -- el Buzzer se movio a
+ *            TIM15 CH2/PA3). Este driver sigue re-forzando ARR=24 antes de
+ *            cada transmision como red de seguridad barata.
  *          - TIM1 as a free-running counter (Internal Clock, no channel/pin),
  *            Prescaler=79, Period=65535, for µs delays.
  *

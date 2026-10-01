@@ -11,7 +11,7 @@
 
 /* ======================  EXTERNAL HAL HANDLES  ============================ */
 
-extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim15;
 
 /* ================================  API  =================================== */
 

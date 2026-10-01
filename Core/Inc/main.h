@@ -59,22 +59,23 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define MUX_SEL_C_Pin GPIO_PIN_13
+#define MUX_SEL_C_GPIO_Port GPIOC
 #define INTERRUPCION_IMU_Pin GPIO_PIN_0
 #define INTERRUPCION_IMU_GPIO_Port GPIOA
 #define CS_FLASH_Pin GPIO_PIN_1
 #define CS_FLASH_GPIO_Port GPIOA
 #define Tx_Laser_Pin GPIO_PIN_2
 #define Tx_Laser_GPIO_Port GPIOA
-#define MUX_SEL_C_Pin GPIO_PIN_3
-#define MUX_SEL_C_GPIO_Port GPIOA
-#define MUX_SEL_CA4_Pin GPIO_PIN_4
-#define MUX_SEL_CA4_GPIO_Port GPIOA
-#define USB_ID_Pin GPIO_PIN_5
-#define USB_ID_GPIO_Port GPIOA
+#define Buzzer_Pin GPIO_PIN_3
+#define Buzzer_GPIO_Port GPIOA
+#define GATILLO_Pin GPIO_PIN_4
+#define GATILLO_GPIO_Port GPIOA
+#define GATILLO_EXTI_IRQn EXTI4_IRQn
 #define BLUETOOTH_MCU_Pin GPIO_PIN_6
 #define BLUETOOTH_MCU_GPIO_Port GPIOA
-#define MUX_SEL_CA7_Pin GPIO_PIN_7
-#define MUX_SEL_CA7_GPIO_Port GPIOA
+#define MUX_SEL_A_Pin GPIO_PIN_7
+#define MUX_SEL_A_GPIO_Port GPIOA
 #define RGB_R_Pin GPIO_PIN_0
 #define RGB_R_GPIO_Port GPIOB
 #define RGB_G_Pin GPIO_PIN_1
@@ -87,15 +88,12 @@ void Error_Handler(void);
 #define BOTON_A_GPIO_Port GPIOB
 #define SELECTOR_MCU_Pin GPIO_PIN_12
 #define SELECTOR_MCU_GPIO_Port GPIOB
-#define GATILLO_Pin GPIO_PIN_8
-#define GATILLO_GPIO_Port GPIOA
-#define GATILLO_EXTI_IRQn EXTI9_5_IRQn
+#define MUX_SEL_B_Pin GPIO_PIN_8
+#define MUX_SEL_B_GPIO_Port GPIOA
 #define MCU_TX_Pin GPIO_PIN_9
 #define MCU_TX_GPIO_Port GPIOA
 #define MCU_RX_Pin GPIO_PIN_10
 #define MCU_RX_GPIO_Port GPIOA
-#define BUZZER_Pin GPIO_PIN_3
-#define BUZZER_GPIO_Port GPIOB
 #define BLUETOOTH_VSP_Pin GPIO_PIN_8
 #define BLUETOOTH_VSP_GPIO_Port GPIOB
 #define BLUETOOTH_AUTORUN_Pin GPIO_PIN_9
