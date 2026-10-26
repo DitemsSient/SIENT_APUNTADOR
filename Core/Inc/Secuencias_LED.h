@@ -14,7 +14,12 @@
  *          Catalogo de secuencias (bloqueantes, un solo tiro):
  *          - SecuenciasLED_FinEjercicio()      -- ciclo R-V-A-Magenta x3 @ 300ms
  *          - SecuenciasLED_FinPorDesconexion() -- cyan x5 @ 400ms
- *          - SecuenciasLED_FinPorAdmin()       -- rojo x5 @ 400ms
+ *          - SecuenciasLED_FinDetenido()       -- rojo x5 @ 400ms ($END_STOP,
+ *                                                  antes "FinPorAdmin"/$END_S)
+ *          - SecuenciasLED_FinGanaste()        -- verde/azul alternando x5 @ 400ms
+ *          - SecuenciasLED_FinPerdiste()        -- rojo/amarillo alternando x5 @ 400ms
+ *                                                  (sin "naranja" real en el HW, 2 canales)
+ *          - SecuenciasLED_FinEmpate()          -- magenta/cian alternando x5 @ 400ms
  *
  *          NOTA (8-sep-2026): colores/tiempos de las 3 de arriba homogenizados
  *          a proposito con el catalogo de LEDs de la tarjeta Sensores
@@ -101,11 +106,32 @@ void SecuenciasLED_FinEjercicio(void);
 void SecuenciasLED_FinPorDesconexion(void);
 
 /**
- * @brief  Secuencia de fin de ejercicio por orden del administrador ($END_S
- *         recibido en medio del ejercicio).
+ * @brief  Secuencia de fin de ejercicio detenido a mano ($END_STOP).
  * @note   Bloqueante (~4 s total). Rojo parpadeando cada 400ms, 5 veces.
  *         LED queda apagado.
  */
-void SecuenciasLED_FinPorAdmin(void);
+void SecuenciasLED_FinDetenido(void);
+
+/**
+ * @brief  Secuencia de fin de ejercicio ganado ($END_WIN).
+ * @note   Bloqueante (~4 s total). Alterna verde/azul cada 400ms, 5 veces
+ *         cada color. LED queda apagado.
+ */
+void SecuenciasLED_FinGanaste(void);
+
+/**
+ * @brief  Secuencia de fin de ejercicio perdido ($END_LOSE).
+ * @note   Bloqueante (~4 s total). Alterna rojo/amarillo cada 400ms, 5 veces
+ *         cada color (el HW no tiene naranja real, es RGB binario de 3
+ *         canales). LED queda apagado.
+ */
+void SecuenciasLED_FinPerdiste(void);
+
+/**
+ * @brief  Secuencia de fin de ejercicio en empate ($END_DRAW).
+ * @note   Bloqueante (~4 s total). Alterna magenta/cian cada 400ms, 5 veces
+ *         cada color. LED queda apagado.
+ */
+void SecuenciasLED_FinEmpate(void);
 
 #endif /* SECUENCIAS_LED_H */

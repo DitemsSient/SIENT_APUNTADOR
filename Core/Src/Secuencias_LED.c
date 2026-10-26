@@ -61,6 +61,21 @@ void SecuenciasLED_ParpadeoNoBloqueanteTick(RGBColor_t color, uint32_t *tick,
     }
 }
 
+/**
+ * @brief  Alterna dos colores `veces` veces cada uno, `ms` por paso.
+ * @note   Bloqueante. LED queda apagado al terminar.
+ */
+static void Led_Alternar2(RGBColor_t a, RGBColor_t b, uint8_t veces, uint16_t ms)
+{
+    for (uint8_t i = 0U; i < veces; i++) {
+        LedRGB_SetColor(a);
+        HAL_Delay(ms);
+        LedRGB_SetColor(b);
+        HAL_Delay(ms);
+    }
+    LedRGB_Off();
+}
+
 /* ====================  CATALOGO DE SECUENCIAS (bloqueantes)  ============== */
 
 void SecuenciasLED_FinEjercicio(void)
@@ -73,7 +88,24 @@ void SecuenciasLED_FinPorDesconexion(void)
     LedRGB_Blink(RGB_CYAN, 5U, 400U, 400U);
 }
 
-void SecuenciasLED_FinPorAdmin(void)
+void SecuenciasLED_FinDetenido(void)
 {
     LedRGB_Blink(RGB_RED, 5U, 400U, 400U);
+}
+
+void SecuenciasLED_FinGanaste(void)
+{
+    Led_Alternar2(RGB_GREEN, RGB_BLUE, 5U, 400U);
+}
+
+void SecuenciasLED_FinPerdiste(void)
+{
+    /* Sin naranja real en el HW (RGB binario de 3 canales) -- amarillo es
+     * lo mas cercano, decidido 15-oct-2026. */
+    Led_Alternar2(RGB_RED, RGB_YELLOW, 5U, 400U);
+}
+
+void SecuenciasLED_FinEmpate(void)
+{
+    Led_Alternar2(RGB_MAGENTA, RGB_CYAN, 5U, 400U);
 }

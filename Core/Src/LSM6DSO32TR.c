@@ -153,14 +153,7 @@ LSM_Status_e LSM6DSO32TR_Init(LSM6DSO32TR_t *dev)
     uint8_t id = 0U;
     s = LSM6DSO32TR_WhoAmI(dev, &id);
     if (s != LSM_OK) return s;
-    /* DIAGNOSTICO TEMPORAL (30-sep-2026) -- freno de ID desactivado a
-     * proposito para ver si el resto de la comunicacion (escritura de
-     * config + lectura de datos reales) funciona aunque el WHO_AM_I no
-     * haga match (0x00 leido en vez de 0x6C esperado). Esperamos que esto
-     * siga fallando mas adelante (el 0x00 apunta a comunicacion realmente
-     * rota, no solo un ID distinto) -- confirmar y REVERTIR este bypass,
-     * no dejar nunca en el firmware real. */
-    /* if (id != LSM_WHO_AM_I_VAL) return LSM_ERR_ID; */
+    if (id != LSM_WHO_AM_I_VAL) return LSM_ERR_ID;
 
     s = LSM_Configure(dev);
     if (s != LSM_OK) return s;

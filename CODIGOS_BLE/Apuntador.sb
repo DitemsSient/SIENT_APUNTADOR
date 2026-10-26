@@ -165,8 +165,31 @@ FUNCTION HndlrUartRx()
         IF ch == 13 THEN
             DIM macStr$
             macStr$ = "$MAC"
+            DIM discStr$
+            discStr$ = "$DISCONNECT"
             IF StrCmp(uartBuf$, macStr$) == 0 THEN
                 rc = ResponderMac()
+            ELSEIF StrCmp(uartBuf$, discStr$) == 0 THEN
+                // El micro pide soltar la conexion activa -- el evento de
+                // desconexion (HndlrBleMsg CASE 1) ya manda $DSCON\r solo,
+                // sin importar quien la haya pedido (20-oct-2026).
+                IF hConn != -1 THEN
+                    PRINT "\nDISCONNECT recibido -- desconectando...\n"
+                    rc = BleDisconnect(hConn)
+                ELSE
+                    // Ya no hay conexion que soltar (el otro lado ya se
+                    // desconecto solo, o ya estabamos desconectados por
+                    // cualquier otra razon) -- contestamos $DSCON\r de
+                    // todos modos para que el micro re-sincronice su estado
+                    // ("s_bt_linked"), sin importar la causa de raiz
+                    // (23-oct-2026, bug real: el boton "Descon." se quedaba
+                    // sin respuesta en este caso).
+                    PRINT "\nDISCONNECT recibido -- ya estaba desconectado\n"
+                    DIM dsMsg2$
+                    dsMsg2$ = "$DSCON\r"
+                    PRINT dsMsg2$
+                    esperandoCon = 1
+                ENDIF
             ELSEIF esperandoCon == 1 THEN
                 DIM conStr$
                 conStr$ = "$CON"

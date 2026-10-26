@@ -61,8 +61,6 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define MUX_SEL_C_Pin GPIO_PIN_13
 #define MUX_SEL_C_GPIO_Port GPIOC
-#define INTERRUPCION_IMU_Pin GPIO_PIN_0
-#define INTERRUPCION_IMU_GPIO_Port GPIOA
 #define CS_FLASH_Pin GPIO_PIN_1
 #define CS_FLASH_GPIO_Port GPIOA
 #define Tx_Laser_Pin GPIO_PIN_2

@@ -57,10 +57,8 @@ static const Inicializacion_I2CDevice_t s_i2c_esperados[] = {
  *  Multiplexor de resistencias (CD4051B)
  * ===========================================================================
  */
-#if INIT_MULTIPLEXOR_ENABLE
 #include "Multiplexor_CD4051B.h"
 mux_handle_t Mux_Laser;
-#endif
 
 /* ===========================================================================
  *  Flash SPI (MX25L6445E)
@@ -82,10 +80,8 @@ mux_handle_t Mux_Laser;
  *  Bluetooth (BL654)
  * ===========================================================================
  */
-#if INIT_BLUETOOTH_ENABLE
 #include "Bluetooth.h"
 Bt_Handle_t Bluetooth;
-#endif
 
 /* ===========================================================================
  *  IMU (LSM6DSO32TR)
@@ -140,21 +136,17 @@ volatile bool ejercicio_disparo_habilitado = false;
  *  Sensor de luz (TSL2571)
  * ===========================================================================
  */
-#if INIT_SENSORLUZ_ENABLE
 #include "SensorLuz_TSL2571.h"
 TSL2571_t SensorLuz;
 TSL2571_RawData_t SensorLuz_UltimaLectura;
 float SensorLuz_UltimoLux;
-#endif
 
 /* ===========================================================================
  *  Fuel gauge / BatteryMonitor (BQ27441)
  * ===========================================================================
  */
-#if INIT_BATTERYMONITOR_ENABLE
 #include "BatteryMonitor.h"
 BatGauge_Data_t Bateria;
-#endif
 
 /* ===========================================================================
  *  Display OLED (SSD1306)
@@ -384,16 +376,6 @@ void Inicializacion_Run(void) {
 
 #if INIT_MAGNETOMETRO_ENABLE
     Log_Print("MAG", "Inicializando magnetometro...");
-
-    /* Lectura cruda del Product ID, independiente de si el Init() de abajo
-     * hace match o no -- mismo patron que el WHO_AM_I del IMU arriba
-     * (30-sep-2026). Solo Logger, no LCD. */
-    {
-        uint8_t mag_product_id = 0U;
-        (void)MMC5983MA_WhoAmI(&mag_product_id);
-        Log_Printf("MAG", "Product ID leido = 0x%02X (se espera 0x%02X)",
-                   mag_product_id, MMC_PRODUCT_ID);
-    }
 
     if (MMC5983MA_Init() == MMC_OK) {
         HAL_Delay(150U); /* espera la primera conversion (ODR 10Hz ~100ms) */

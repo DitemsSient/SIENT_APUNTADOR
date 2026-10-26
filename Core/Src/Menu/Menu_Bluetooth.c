@@ -180,6 +180,18 @@ static void bt_mac_query_start(void)
     Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U);
 }
 
+/**
+ * @brief  Manda "$DISCONNECT\r" -- le pide al modulo que suelte la conexion
+ *         activa. No hace falta nada mas aqui: el modulo dispara el mismo
+ *         evento de desconexion de siempre y manda $DSCON\r de vuelta, que
+ *         BluetoothTask ya vigila de forma global (20-oct-2026).
+ */
+static void bt_send_disconnect(void)
+{
+    static const uint8_t cmd[] = "$DISCONNECT\r";
+    Bt_Transmit(&Bluetooth, cmd, sizeof(cmd) - 1U);
+}
+
 /* ========================  DRAW  ========================================= */
 
 void Screen_Bluetooth_Draw(Menu_Handle_t *h)
@@ -203,9 +215,13 @@ void Screen_Bluetooth_Draw(Menu_Handle_t *h)
                 ssd1306_setCursor(0, 0);
                 ssd1306_print(line, &Font5x7);
 
-                int16_t y = 16;
-                ssd1306_setCursor(0, y);
-                ssd1306_print("> Salir", &Font5x7);
+                const char *opts2[] = { "Salir", "Descon." };
+                for (uint8_t i = 0U; i < 2U; i++) {
+                    int16_t y = (int16_t)(16 + i * MENU_LINE_H);
+                    ssd1306_setCursor(0, y);
+                    ssd1306_print((i == h->selected) ? "> " : "  ", &Font5x7);
+                    ssd1306_print(opts2[i], &Font5x7);
+                }
             } else {
                 const char *opts[] = { "Anunciar", "MAC", "Salir" };
                 for (uint8_t i = 0U; i < 3U; i++) {
@@ -402,9 +418,16 @@ void Screen_Bluetooth_OnButton(Menu_Handle_t *h, MenuButton_e btn)
     }
 
     if (s_bt_linked) {
-        /* Only option is Salir */
-        if (btn == BTN_ENTER) {
-            Menu_GoTo(h, SCREEN_MAIN_MENU);
+        /* Conectado: Salir / Descon. */
+        if (btn == BTN_NAVIGATE) {
+            h->selected     = (h->selected == 0U) ? 1U : 0U;
+            h->needs_redraw = true;
+        } else if (btn == BTN_ENTER) {
+            if (h->selected == 1U) {
+                bt_send_disconnect();
+            } else {
+                Menu_GoTo(h, SCREEN_MAIN_MENU);
+            }
         }
         return;
     }

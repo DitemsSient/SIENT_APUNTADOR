@@ -54,7 +54,12 @@ TIM_HandleTypeDef htim15;
 UART_HandleTypeDef huart1;
 
 /* Definitions for defaultTask */
-
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -140,7 +145,10 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
+  /* creation of defaultTask -- NO crear, no la usamos (ver Tareas_CrearTareas()).
+   * CubeMX la reinserta sola en cada regeneracion -- volver a comentar esta
+   * linea, o mejor, borrarla desde CubeMX (FreeRTOS -> Tasks and Queues). */
+  /* defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes); */
 
   /* USER CODE BEGIN RTOS_THREADS */
   Tareas_CrearTareas();
@@ -554,12 +562,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(MUX_SEL_C_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : INTERRUPCION_IMU_Pin BLUETOOTH_MCU_Pin */
-  GPIO_InitStruct.Pin = INTERRUPCION_IMU_Pin|BLUETOOTH_MCU_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pins : CS_FLASH_Pin MUX_SEL_A_Pin MUX_SEL_B_Pin */
   GPIO_InitStruct.Pin = CS_FLASH_Pin|MUX_SEL_A_Pin|MUX_SEL_B_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -572,6 +574,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GATILLO_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BLUETOOTH_MCU_Pin */
+  GPIO_InitStruct.Pin = BLUETOOTH_MCU_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BLUETOOTH_MCU_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RGB_R_Pin RGB_G_Pin RGB_B_Pin SELECTOR_MCU_Pin
                            BLUETOOTH_VSP_Pin BLUETOOTH_AUTORUN_Pin */
@@ -589,7 +597,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -611,10 +619,8 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* init code for USB_DEVICE */
-  /* MX_USB_DEVICE_Init(); -- NO llamar aqui, ya se hizo en Inicializacion_Run()
-   * (pre-RTOS). Llamarlo de nuevo resetea el stack USB/CDC mientras el host
-   * ya tiene la conexion activa, rompiendo el Logger en silencio. CubeMX
-   * reinserta esta linea sola en cada regeneracion -- volver a comentarla. */
+  /* MX_USB_DEVICE_Init(); -- NO llamar, ya se hizo en Inicializacion_Run()
+   * (pre-RTOS); y de cualquier forma esta tarea ya no se crea arriba. */
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)

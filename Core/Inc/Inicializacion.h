@@ -46,7 +46,7 @@
 #define INIT_FLASH_ENABLE            1U
 #define INIT_BUZZER_ENABLE           1U  /* Reactivado 30-sep-2026: Buzzer se movio a TIM15 CH2/PA3 (timer propio, ya no comparte ARR con el laser en TIM2) -- ver Pendientes.md */
 #define INIT_BLUETOOTH_ENABLE        1U
-#define INIT_IMU_ENABLE              1U
+#define INIT_IMU_ENABLE              0U
 #define INIT_MAGNETOMETRO_ENABLE     1U
 #define INIT_SENSORLUZ_ENABLE        1U
 #define INIT_BATTERYMONITOR_ENABLE   1U
@@ -56,17 +56,13 @@
 
 /* ========================  GLOBAL STATE  =================================== */
 
-#if INIT_MULTIPLEXOR_ENABLE
 #include "Multiplexor_CD4051B.h"
 extern mux_handle_t Mux_Laser;
-#endif
 
-#if INIT_SENSORLUZ_ENABLE
 #include "SensorLuz_TSL2571.h"
 extern TSL2571_t SensorLuz;
 extern TSL2571_RawData_t SensorLuz_UltimaLectura;
 extern float SensorLuz_UltimoLux;
-#endif
 
 #if INIT_IMU_ENABLE
 #include "LSM6DSO32TR.h"
@@ -87,15 +83,11 @@ extern Menu_Handle_t hmenu;
 #include "HWTest_Status.h"
 extern HWTest_Status_t hw_status;
 
-#if INIT_BLUETOOTH_ENABLE
 #include "Bluetooth.h"
 extern Bt_Handle_t Bluetooth;
-#endif
 
-#if INIT_BATTERYMONITOR_ENABLE
 #include "BatteryMonitor.h"
 extern BatGauge_Data_t Bateria;
-#endif
 
 /* ========================  DIAGNOSTICO  ===================================== */
 

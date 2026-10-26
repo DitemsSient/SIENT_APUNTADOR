@@ -92,6 +92,7 @@ typedef struct {
     bool                rx_ready;       /**< true when data is available     */
     uint8_t             raw_debug[BT_RAW_DEBUG_LEN]; /**< Ring buffer: ultimos BT_RAW_DEBUG_LEN bytes crudos */
     uint16_t            raw_debug_count;              /**< Total acumulado (no capado) -- usar %BT_RAW_DEBUG_LEN */
+    volatile uint32_t   rx_errors;           /**< Veces que entro HAL_UART_ErrorCallback() (17-oct-2026) */
 } Bt_Handle_t;
 
 /* ================================  API  =================================== */

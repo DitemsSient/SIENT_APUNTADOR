@@ -264,7 +264,8 @@ static void LuzMuxTask(void *argument) {
  * trataba como segundos mientras se probaba en banco). tiempo == 0 significa
  * tiempo ILIMITADO -- ver el chequeo explicito mas abajo, antes de comparar
  * contra duracion_ms. En ese caso la unica forma de terminar el ejercicio es
- * via $END_S/$END_M/$DSCON (Sensores manda el END, nunca por temporizador). */
+ * via $DSCON o un $END_WIN/$END_LOSE/$END_DRAW/$END_STOP de la MASTER
+ * (Sensores manda el fin, nunca por temporizador). */
 #define EXERCISE_TIEMPO_MULTIPLICADOR_MS   60000U
 
 static osThreadId_t s_exerciseTaskHandle = NULL;
@@ -303,21 +304,122 @@ static volatile bool s_ejercicio_activo = false;
  * ExerciseTask la revisa en cada vuelta de su loop corto y aborta. */
 static volatile bool s_dscon_en_ejercicio = false;
 
-/* Idem, para $END_S -- el encargado del juego (Sensores) puede detener el
- * ejercicio en cualquier momento para cualquier jugador. */
-static volatile bool s_end_admin_en_ejercicio = false;
+/* Comandos de la MASTER (Sensores) sobre el fin/resultado del juego, protocolo
+ * nuevo (14-oct-2026, ver Pendientes.md) -- $END_S/$END_M quedaron obsoletos.
+ * BluetoothTask la pone al recibir cualquiera de estos; ExerciseTask la lee
+ * y la regresa a NONE al consumirla (un solo pendiente a la vez, igual que
+ * s_ack_pendiente -- los envios de la MASTER son secuenciales). */
+typedef enum {
+    MASTER_CMD_NONE = 0,
+    MASTER_CMD_DEAD,            /* $DEAD -- este jugador se quedo sin vidas, el juego sigue para los demas */
+    MASTER_CMD_TIME_UP,         /* $TIME_UP -- se acabo el tiempo, esperando resultados */
+    MASTER_CMD_END_WIN,         /* $END_WIN */
+    MASTER_CMD_END_LOSE,        /* $END_LOSE */
+    MASTER_CMD_END_DRAW,        /* $END_DRAW */
+    MASTER_CMD_END_STOP,        /* $END_STOP -- detenido a mano */
+    MASTER_CMD_ERROR_TIME_UP,   /* $ERROR_TIME_UP -- respaldo de $TIME_UP: algo fallo
+                                  * del lado de la MASTER, salir (15-oct-2026) */
+} MasterCmd_e;
 
-/* Idem, para $END_M -- Sensores nos avisa que este jugador se quedo sin
- * vidas (murio), en cualquier momento durante el ejercicio. */
-static volatile bool s_end_muerte_en_ejercicio = false;
+static volatile MasterCmd_e s_master_cmd = MASTER_CMD_NONE;
+
+/** @brief true si `cmd` es un resultado final (termina el ejercicio), a
+ *         diferencia de DEAD/TIME_UP (el ejercicio sigue "activo" mientras
+ *         se espera el resultado, ver ExerciseTask_EsperarResultado()). */
+static inline bool MasterCmd_EsTerminal(MasterCmd_e cmd) {
+    return (cmd == MASTER_CMD_END_WIN)  || (cmd == MASTER_CMD_END_LOSE) ||
+           (cmd == MASTER_CMD_END_DRAW) || (cmd == MASTER_CMD_END_STOP) ||
+           (cmd == MASTER_CMD_ERROR_TIME_UP);
+}
 
 /** @brief Motivo por el que ExerciseTask salio de su ciclo principal. */
 typedef enum {
-    EXFIN_NORMAL = 0,  /* tiempo agotado, fin normal */
+    EXFIN_NORMAL = 0,  /* tiempo agotado, fin normal (Mira manda $END_A) */
     EXFIN_DSCON,        /* $DSCON recibido */
-    EXFIN_ADMIN,         /* $END_S recibido */
-    EXFIN_MUERTE,        /* $END_M recibido -- sin vidas */
+    EXFIN_WIN,           /* $END_WIN recibido */
+    EXFIN_LOSE,          /* $END_LOSE recibido */
+    EXFIN_DRAW,          /* $END_DRAW recibido */
+    EXFIN_STOP,          /* $END_STOP recibido, o $ERROR_TIME_UP (fallo de la MASTER) */
 } ExercicioFinMotivo_e;
+
+/**
+ * @brief  Pantalla de espera tras $DEAD o $TIME_UP -- bloquea el gatillo y
+ *         se queda aqui, SIN timeout local, hasta que llegue el $END_...
+ *         final de la MASTER, un $DSCON, o (solo tras $TIME_UP) un
+ *         $ERROR_TIME_UP -- el respaldo real para no quedarse atorado es
+ *         ese mensaje explicito de la MASTER, no un timer local de Mira
+ *         (decision 15-oct-2026: el temporizador de la MASTER puede no
+ *         coincidir con cualquier numero fijo que pusieramos aqui).
+ * @note   Revisa al ritmo normal del Ejercicio (EXERCISE_TASK_LOOP_MS) --
+ *         NO espaciar este chequeo (ej. a 30s) aunque la espera en si pueda
+ *         ser larga: revisar s_master_cmd es practicamente gratis, y
+ *         espaciarlo solo retrasa la reaccion real al $END_... cuando por
+ *         fin llega (confirmado con hardware real, 15-oct-2026 -- con 30s
+ *         de por medio, $END_STOP tardaba hasta 30s en registrarse aunque
+ *         BluetoothTask ya lo hubiera contestado al instante).
+ */
+static ExercicioFinMotivo_e ExerciseTask_EsperarResultado(const char *linea1, const char *linea2) {
+    ejercicio_disparo_habilitado = false;
+
+    ssd1306_clearDisplay();
+    ssd1306_setTextSize(1U);
+    ssd1306_setTextColor(WHITE);
+    ssd1306_printCentered(linea1, 6, &Font5x7);
+    if (linea2 != NULL) {
+        ssd1306_printCentered(linea2, 18, &Font5x7);
+    }
+    ssd1306_display();
+
+    for (;;) {
+        osDelay(EXERCISE_TASK_LOOP_MS);
+        gatillo_log_si_pendiente();
+
+        if (s_dscon_en_ejercicio) { return EXFIN_DSCON; }
+
+        switch (s_master_cmd) {
+            case MASTER_CMD_END_WIN:  s_master_cmd = MASTER_CMD_NONE; return EXFIN_WIN;
+            case MASTER_CMD_END_LOSE: s_master_cmd = MASTER_CMD_NONE; return EXFIN_LOSE;
+            case MASTER_CMD_END_DRAW: s_master_cmd = MASTER_CMD_NONE; return EXFIN_DRAW;
+            case MASTER_CMD_END_STOP: s_master_cmd = MASTER_CMD_NONE; return EXFIN_STOP;
+            case MASTER_CMD_ERROR_TIME_UP:
+                s_master_cmd = MASTER_CMD_NONE;
+                Log_Print("EJERCICIO", "ERROR_TIME_UP recibido -- fallo del lado de la MASTER, saliendo");
+                return EXFIN_STOP;
+            default: break;  /* NONE, o DEAD/TIME_UP repetido -- se ignora, seguimos esperando */
+        }
+    }
+}
+
+/**
+ * @brief  Revisa s_master_cmd; si hay algo pendiente, lo consume y resuelve
+ *         el motivo de fin correspondiente (bloqueante si es DEAD/TIME_UP,
+ *         ver ExerciseTask_EsperarResultado()).
+ * @return true si se resolvio un motivo (el caller debe hacer `break`).
+ */
+static bool ExerciseTask_ProcesarMasterCmd(ExercicioFinMotivo_e *motivo) {
+    MasterCmd_e cmd = s_master_cmd;
+    if (cmd == MASTER_CMD_NONE) { return false; }
+    s_master_cmd = MASTER_CMD_NONE;
+
+    switch (cmd) {
+        case MASTER_CMD_DEAD:
+            *motivo = ExerciseTask_EsperarResultado("HAS MUERTO", "X  X");
+            break;
+        case MASTER_CMD_TIME_UP:
+            *motivo = ExerciseTask_EsperarResultado("ESPERANDO", "RESULTADOS");
+            break;
+        case MASTER_CMD_END_WIN:  *motivo = EXFIN_WIN;  break;
+        case MASTER_CMD_END_LOSE: *motivo = EXFIN_LOSE; break;
+        case MASTER_CMD_END_DRAW: *motivo = EXFIN_DRAW; break;
+        case MASTER_CMD_END_STOP: *motivo = EXFIN_STOP; break;
+        case MASTER_CMD_ERROR_TIME_UP:
+            Log_Print("EJERCICIO", "ERROR_TIME_UP recibido -- fallo del lado de la MASTER, saliendo");
+            *motivo = EXFIN_STOP;
+            break;
+        default: return false;
+    }
+    return true;
+}
 
 static void ExerciseTask(void *argument) {
     (void)argument;
@@ -334,9 +436,8 @@ static void ExerciseTask(void *argument) {
         ExercicioFinMotivo_e motivo = EXFIN_NORMAL;
         for (uint8_t n = 10U; n >= 1U; n--) {
             gatillo_log_si_pendiente();
-            if (s_dscon_en_ejercicio)      { motivo = EXFIN_DSCON;  break; }
-            if (s_end_admin_en_ejercicio)  { motivo = EXFIN_ADMIN;  break; }
-            if (s_end_muerte_en_ejercicio) { motivo = EXFIN_MUERTE; break; }
+            if (s_dscon_en_ejercicio) { motivo = EXFIN_DSCON; break; }
+            if (ExerciseTask_ProcesarMasterCmd(&motivo)) { break; }
 
             char buf[5];
             snprintf(buf, sizeof(buf), "%u", n);
@@ -379,13 +480,12 @@ static void ExerciseTask(void *argument) {
 
                 gatillo_log_si_pendiente();
 
-                if (s_dscon_en_ejercicio)      { motivo = EXFIN_DSCON;  break; }
-                if (s_end_admin_en_ejercicio)  { motivo = EXFIN_ADMIN;  break; }
-                if (s_end_muerte_en_ejercicio) { motivo = EXFIN_MUERTE; break; }
+                if (s_dscon_en_ejercicio) { motivo = EXFIN_DSCON; break; }
+                if (ExerciseTask_ProcesarMasterCmd(&motivo)) { break; }
 
                 /* tiempo == 0 -> duracion_ms == 0 -> ilimitado, nunca
-                 * termina por temporizador (solo por $DSCON/$END_S/$END_M,
-                 * ya revisados arriba). */
+                 * termina por temporizador (solo por $DSCON o un comando de
+                 * la MASTER, ya revisados arriba). */
                 if ((duracion_ms != 0U) &&
                     ((HAL_GetTick() - tick_inicio_ejercicio) >= duracion_ms)) {
                     break;  /* fin normal, tiempo agotado */
@@ -418,6 +518,15 @@ static void ExerciseTask(void *argument) {
         if (motivo == EXFIN_DSCON) {
             Log_Print("EJERCICIO", "Terminado -- $DSCON recibido");
 
+            /* Limpiar el estado "conectado" de la pantalla de Bluetooth --
+             * si no, al volver al menu queda guardada la sesion vieja (ve
+             * "Id:.../Salir" en vez de "Anunciar"), sin forma de volver a
+             * conectar sin reiniciar la tarjeta (15-oct-2026). Mismo
+             * reset que hace Menu_HandleDisconnect() para el $DSCON que
+             * llega fuera de un ejercicio. */
+            Screen_Bluetooth_ResetLink();
+            hmenu.bt_connected = false;
+
             ssd1306_clearDisplay();
             ssd1306_setTextSize(1U);
             ssd1306_setTextColor(WHITE);
@@ -426,33 +535,52 @@ static void ExerciseTask(void *argument) {
             ssd1306_display();
 
             SecuenciasLED_FinPorDesconexion();
-        } else if (motivo == EXFIN_ADMIN) {
-            Log_Print("EJERCICIO", "Terminado -- $END_S recibido (parado por admin)");
+        } else if (motivo == EXFIN_WIN) {
+            Log_Print("EJERCICIO", "Terminado -- $END_WIN recibido");
 
             ssd1306_clearDisplay();
             ssd1306_setTextSize(1U);
             ssd1306_setTextColor(WHITE);
-            ssd1306_printCentered("FINALIZADO", 6, &Font5x7);
-            ssd1306_printCentered("POR ADMIN", 18, &Font5x7);
+            ssd1306_printCentered("GANASTE", 12, &Font5x7);
             ssd1306_display();
 
-            SecuenciasLED_FinPorAdmin();
-            osDelay(5000U);
-        } else if (motivo == EXFIN_MUERTE) {
-            Log_Print("EJERCICIO", "Terminado -- $END_M recibido (sin vidas)");
+            SecuenciasLED_FinGanaste();
+        } else if (motivo == EXFIN_LOSE) {
+            Log_Print("EJERCICIO", "Terminado -- $END_LOSE recibido");
 
             ssd1306_clearDisplay();
             ssd1306_setTextSize(1U);
             ssd1306_setTextColor(WHITE);
-            ssd1306_printCentered("HAS MUERTO", 12, &Font5x7);
+            ssd1306_printCentered("PERDISTE", 12, &Font5x7);
             ssd1306_display();
 
-            SecuenciasLED_FinEjercicio();
+            SecuenciasLED_FinPerdiste();
+        } else if (motivo == EXFIN_DRAW) {
+            Log_Print("EJERCICIO", "Terminado -- $END_DRAW recibido");
+
+            ssd1306_clearDisplay();
+            ssd1306_setTextSize(1U);
+            ssd1306_setTextColor(WHITE);
+            ssd1306_printCentered("EMPATE", 12, &Font5x7);
+            ssd1306_display();
+
+            SecuenciasLED_FinEmpate();
+        } else if (motivo == EXFIN_STOP) {
+            Log_Print("EJERCICIO", "Terminado -- $END_STOP o $ERROR_TIME_UP recibido");
+
+            ssd1306_clearDisplay();
+            ssd1306_setTextSize(1U);
+            ssd1306_setTextColor(WHITE);
+            ssd1306_printCentered("TERMINADO", 12, &Font5x7);
+            ssd1306_display();
+
+            SecuenciasLED_FinDetenido();
         } else {
             Log_Print("EJERCICIO", "Terminado -- tiempo agotado");
 
-            /* Solo tiene caso mandarlo aqui -- si abortamos por $DSCON/$END_S
-             * ya no hay a quien avisarle (o ya nos avisaron ellos). */
+            /* Solo tiene caso mandarlo aqui -- si abortamos por $DSCON o por
+             * un $END_... de la MASTER ya no hay a quien avisarle (o ya nos
+             * avisaron ellos). */
             static const uint8_t end_msg[] = "$END_A\r";
             Bt_Transmit(&Bluetooth, end_msg, sizeof(end_msg) - 1U);
             Log_Print("EJERCICIO", "END_A enviado por Bluetooth");
@@ -467,10 +595,9 @@ static void ExerciseTask(void *argument) {
             SecuenciasLED_FinEjercicio();
         }
 
-        s_ejercicio_activo        = false;
-        s_dscon_en_ejercicio      = false;
-        s_end_admin_en_ejercicio  = false;
-        s_end_muerte_en_ejercicio = false;
+        s_ejercicio_activo   = false;
+        s_dscon_en_ejercicio = false;
+        s_master_cmd         = MASTER_CMD_NONE;
 
         Menu_GoTo(&hmenu, SCREEN_MAIN_MENU);
         MenuTask_Reanudar();
@@ -491,8 +618,7 @@ static void ExerciseTask(void *argument) {
 static void Tareas_IniciarEjercicio(void) {
     s_ejercicio_activo           = true;
     s_dscon_en_ejercicio         = false;
-    s_end_admin_en_ejercicio     = false;
-    s_end_muerte_en_ejercicio    = false;
+    s_master_cmd                 = MASTER_CMD_NONE;
     ejercicio_disparo_habilitado = false;  /* se prende al terminar la cuenta */
 
     /* Pausa MenuTask de forma segura (nunca a medio mutex I2C) ANTES de
@@ -516,9 +642,10 @@ static void Tareas_IniciarEjercicio(void) {
 }
 
 /* ===========================================================================
- *  BluetoothTask -- vigila $DSCON, $END_S, $END_M, $RUN, $CONF<datos> y
- *  $A_SN<vidas> de forma global (cualquier pantalla, incluso con MenuTask
- *  suspendida durante el Ejercicio) y responde su ACK correspondiente
+ *  BluetoothTask -- vigila $DSCON, $DEAD, $TIME_UP, $ERROR_TIME_UP, $END_WIN,
+ *  $END_LOSE, $END_DRAW, $END_STOP, $RUN, $CONF<datos> y $A_SN<vidas> de forma global
+ *  (cualquier pantalla, incluso con MenuTask suspendida durante el
+ *  Ejercicio) y responde su ACK correspondiente
  *  (menos $A_SN, que es solo informativo). El resto de mensajes ($ACKCON,
  *  $NoCON) se dejan intactos para que Menu_Bluetooth.c los
  *  siga consumiendo igual que antes.
@@ -562,35 +689,94 @@ static void BluetoothTask(void *argument) {
                     MenuTask_Reanudar();
                 }
 
-            } else if (Bluetooth.rx_count >= 5U &&
-                       strncmp((char *)Bluetooth.rx_buffer, "END_S", 5U) == 0) {
+            } else if (Bluetooth.rx_count >= 4U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "DEAD", 4U) == 0) {
 
-                /* $END_S -- el encargado del juego para el ejercicio para
-                 * cualquier jugador, en cualquier momento. Mismo patron que
-                 * $DSCON: si hay ejercicio activo, ExerciseTask reacciona;
-                 * si no, no hay nada que detener. */
-                Log_Print("BT-TASK", "END_S recibido");
+                /* $DEAD -- este jugador se quedo sin vidas. El juego SIGUE
+                 * para los demas -- NO termina el ejercicio, solo bloquea el
+                 * gatillo y muestra "HAS MUERTO" (ver
+                 * ExerciseTask_EsperarResultado()). Protocolo nuevo
+                 * 14-oct-2026, reemplaza al $END_M obsoleto. */
+                Log_Print("BT-TASK", "DEAD recibido");
                 Bt_ResetRx(&Bluetooth);
-                bt_task_send_ack("$ACKEND_S\r");
+                bt_task_send_ack("$ACKDEAD\r");
 
                 if (s_ejercicio_activo) {
-                    s_end_admin_en_ejercicio = true;  /* ExerciseTask reacciona */
+                    s_master_cmd = MASTER_CMD_DEAD;
                 }
 
-            } else if (Bluetooth.rx_count >= 5U &&
-                       strncmp((char *)Bluetooth.rx_buffer, "END_M", 5U) == 0) {
+            } else if (Bluetooth.rx_count >= 7U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "TIME_UP", 7U) == 0) {
 
-                /* $END_M -- Sensores detecto que este jugador se quedo sin
-                 * vidas. Mismo patron que $END_S/$DSCON: vigilado en
-                 * cualquier momento; si hay ejercicio activo, ExerciseTask
-                 * lo corta mostrando "HAS MUERTO" con la secuencia de LED
-                 * de fin normal. */
-                Log_Print("BT-TASK", "END_M recibido");
+                /* $TIME_UP -- se acabo el tiempo, esperando resultados.
+                 * Igual que $DEAD: bloquea el gatillo, NO termina el
+                 * ejercicio todavia (espera el $END_... final). */
+                Log_Print("BT-TASK", "TIME_UP recibido");
                 Bt_ResetRx(&Bluetooth);
-                bt_task_send_ack("$ACKEND_M\r");
+                bt_task_send_ack("$ACKTIME_UP\r");
 
                 if (s_ejercicio_activo) {
-                    s_end_muerte_en_ejercicio = true;  /* ExerciseTask reacciona */
+                    s_master_cmd = MASTER_CMD_TIME_UP;
+                }
+
+            } else if (Bluetooth.rx_count >= 13U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "ERROR_TIME_UP", 13U) == 0) {
+
+                /* $ERROR_TIME_UP -- respaldo de $TIME_UP: la MASTER avisa
+                 * que algo fallo de su lado (su propio temporizador se le
+                 * agoto sin resolver el resultado). Salimos del ejercicio,
+                 * sin quedarnos esperando (15-oct-2026). */
+                Log_Print("BT-TASK", "ERROR_TIME_UP recibido");
+                Bt_ResetRx(&Bluetooth);
+                bt_task_send_ack("$ACKERROR_TIME_UP\r");
+
+                if (s_ejercicio_activo) {
+                    s_master_cmd = MASTER_CMD_ERROR_TIME_UP;
+                }
+
+            } else if (Bluetooth.rx_count >= 7U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "END_WIN", 7U) == 0) {
+
+                Log_Print("BT-TASK", "END_WIN recibido");
+                Bt_ResetRx(&Bluetooth);
+                bt_task_send_ack("$ACKEND_WIN\r");
+
+                if (s_ejercicio_activo) {
+                    s_master_cmd = MASTER_CMD_END_WIN;
+                }
+
+            } else if (Bluetooth.rx_count >= 8U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "END_LOSE", 8U) == 0) {
+
+                Log_Print("BT-TASK", "END_LOSE recibido");
+                Bt_ResetRx(&Bluetooth);
+                bt_task_send_ack("$ACKEND_LOSE\r");
+
+                if (s_ejercicio_activo) {
+                    s_master_cmd = MASTER_CMD_END_LOSE;
+                }
+
+            } else if (Bluetooth.rx_count >= 8U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "END_DRAW", 8U) == 0) {
+
+                Log_Print("BT-TASK", "END_DRAW recibido");
+                Bt_ResetRx(&Bluetooth);
+                bt_task_send_ack("$ACKEND_DRAW\r");
+
+                if (s_ejercicio_activo) {
+                    s_master_cmd = MASTER_CMD_END_DRAW;
+                }
+
+            } else if (Bluetooth.rx_count >= 8U &&
+                       strncmp((char *)Bluetooth.rx_buffer, "END_STOP", 8U) == 0) {
+
+                /* $END_STOP -- detenido a mano (reemplaza al $END_S obsoleto). */
+                Log_Print("BT-TASK", "END_STOP recibido");
+                Bt_ResetRx(&Bluetooth);
+                bt_task_send_ack("$ACKEND_STOP\r");
+
+                if (s_ejercicio_activo) {
+                    s_master_cmd = MASTER_CMD_END_STOP;
                 }
 
             } else if (Bluetooth.rx_count >= 3U &&
@@ -709,7 +895,7 @@ static void ApuntadorUpdateTask_EnviarConAck(void) {
 
     for (uint8_t intento = 0U; intento <= A_AP_MAX_REINTENTOS; intento++) {
         if (!s_ejercicio_activo || s_dscon_en_ejercicio ||
-            s_end_admin_en_ejercicio || s_end_muerte_en_ejercicio) {
+            MasterCmd_EsTerminal(s_master_cmd)) {
             /* El ejercicio ya termino (tiempo agotado) mientras estabamos
              * a media espera/reintento de un intento anterior -- no seguir
              * mandando/reintentando fuera de Ejercicio (ej. si el usuario
@@ -737,12 +923,8 @@ static void ApuntadorUpdateTask_EnviarConAck(void) {
                 Log_Print("A_AP", "Abortado -- DSCON en medio de la espera del ACK");
                 return;
             }
-            if (s_end_admin_en_ejercicio) {
-                Log_Print("A_AP", "Abortado -- END_S en medio de la espera del ACK");
-                return;
-            }
-            if (s_end_muerte_en_ejercicio) {
-                Log_Print("A_AP", "Abortado -- END_M en medio de la espera del ACK");
+            if (MasterCmd_EsTerminal(s_master_cmd)) {
+                Log_Print("A_AP", "Abortado -- resultado final de la MASTER en medio de la espera del ACK");
                 return;
             }
             if (!s_ejercicio_activo) {

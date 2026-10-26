@@ -11,6 +11,7 @@
  */
 
 #include "Bluetooth.h"
+#include "Logger.h"
 #include <string.h>
 
 /* ========================  EXTERNAL HAL HANDLES  ========================== */
@@ -31,6 +32,7 @@ BtStatus_e Bt_Init(Bt_Handle_t *h)
     h->rx_byte         = 0U;
     h->rx_ready        = false;
     h->raw_debug_count = 0U;
+    h->rx_errors       = 0U;
     memset(h->tx_buffer, 0, BT_TX_BUFFER_SIZE);
     memset(h->rx_buffer, 0, BT_RX_BUFFER_SIZE);
     memset(h->raw_debug, 0, BT_RAW_DEBUG_LEN);
@@ -129,6 +131,29 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
     if (huart->Instance == USART1) {
         Bt_StoreByte(&Bluetooth);
+    }
+}
+
+/**
+ * @brief  Re-arma la recepción por IT de huart1 tras un error (ruido,
+ *         overrun, framing, etc.).
+ * @note   CRITICO (17-oct-2026, bug real encontrado): ante cualquier error
+ *         de UART, el HAL aborta la recepción por interrupción en curso y
+ *         NO la vuelve a armar solo -- sin este callback, un solo glitch
+ *         electrico (muy posible justo al caerse el enlace BLE) deja sordo
+ *         el Bluetooth para siempre, hasta un reset completo de la
+ *         tarjeta. Aqui nomas se reinicia la escucha del siguiente byte,
+ *         igual que hace Bt_StoreByte() en cada byte normal.
+ */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    extern Bt_Handle_t Bluetooth;
+
+    if (huart->Instance == USART1) {
+        Bluetooth.rx_errors++;
+        Log_Printf("BT", "UART error #%lu (ErrorCode=0x%08lX) -- re-armando recepcion",
+                   (unsigned long)Bluetooth.rx_errors, (unsigned long)huart->ErrorCode);
+        HAL_UART_Receive_IT(huart, &Bluetooth.rx_byte, 1U);
     }
 }
 
